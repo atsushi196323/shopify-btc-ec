@@ -63,9 +63,11 @@ docs/adr/  docs/diagrams/
 ```
 
 ### ローカル環境
-- BTCPay の最小 compose（bitcoind・NBXplorer・BTCPay・Postgres）を `infra/regtest/` に自作する。
-  - W1 で5時間を上限に検証する。終わらなければ BTCPayServer.Tests の compose を
-    上記4サービスに絞って流用する。
+- BTCPay の最小 compose（bitcoind・NBXplorer・BTCPay・Postgres）を `infra/regtest/` に置く。
+  - BTCPayServer.Tests の compose には BTCPay 本体が含まれない（依存サービスだけ）。そのため、
+    **BTCPay の `v2.4.4` タグ時点の Tests の compose から bitcoind・NBXplorer・Postgres の定義を写し、
+    `btcpayserver/btcpayserver:2.4.4` を足す**形を最初から使う。4つのイメージはすべて arm64 版がある。
+  - W1 で5時間を上限に検証する。届かなければ段階的に引き上げる（8章の W1 計画）。
 - `shopify.web.toml` に `port = 3000` を書き、アプリのポートを固定する。
   - Shopify → アプリ: Shopify CLI のトンネル経由
   - BTCPay → アプリ: `http://host.docker.internal:3000/webhooks/btcpay`
@@ -287,17 +289,50 @@ Shopify の Webhook（`orders/create`）は、MVP では inbox を通さない�
 
 ## 8. 計画
 
-- 作業時間: 週15時間（平日2時間 × 5日 ＋ 週末5時間）。下振れ時は週10時間。
+- 作業時間: 週15時間（時間帯は自由に配置する）。下振れ時は週10時間。予定より早く進んだ分は予備が増えたものとして扱う。
 - MVP（W1〜W4）: 10/1〜10/28。予備: 10/29〜11/11。**完成目標は11月中旬**。その後に stretch に取り組む。
 - ADR は、実装したその週に1件あたり約15分で書く。
 
 | 週 | タスク | ADR | 確認項目 |
 |---|---|---|---|
-| W1 | compose の検証（5時間で区切る）、雛形・手動決済方法・ポート固定、Prisma スキーマ、ドメインと単体テスト | 2, 3, 6, 7, 10 | Prisma で複合外部キーが書けるか、`foreign_keys` が有効か |
-| W2 | invoice 作成（予約行・孤児検索）、拡張、金額の検証、デコレータとシナリオ7 | 1, 4, 5 | BTCPay の支払い画面に `orderId` が表示されるか |
+| W1 | compose の検証（5時間で区切る）、`shopify app init`、Prisma の検証（1.5時間で区切る）、ポート固定・手動決済方法、Prisma スキーマ、ドメインと単体テスト | 2, 3, 6, 7, 10 | Prisma で複合外部キーが書けるか、`foreign_keys` が有効か |
+| W2 | bootstrap スクリプト化の残り、BTCPay の Webhook 送信先をアプリ本体に置き換え、invoice 作成（予約行・孤児検索）、拡張、金額の検証、デコレータとシナリオ7 | 1, 4, 5 | BTCPay の支払い画面に `orderId` が表示されるか |
 | W3 | BTCPay Webhook・inbox・ワーカー、Shopify への反映、異常系・再発行、シナリオ1〜5・9 | 8, 9 | 無効化した invoice に入金したときの BTCPay の挙動 |
 | W4 | スイープ、シナリオ6・8、GitHub Actions、README・図、デモ動画 | 見直し | |
 
+### W1 の詳細計画（10/1〜10/7、合計15時間）
+
+| 日 | 作業 | 時間 |
+|---|---|---|
+| 10/1（木）〜10/2（金） | compose の検証。手作業で完了ラインまで通す | 5h |
+| 10/3（土）〜10/4（日） | ① `shopify app init` 0.5h → ② Prisma の検証 1.5h → ③ ポート固定（`port = 3000`）と手動決済方法の作成 1.5h → ④ bootstrap スクリプト化 0.5h（残りは W2 の最初に回す） | 4h |
+| 10/5（月）〜10/7（水） | Prisma スキーマの本実装 2h / ドメイン（状態機械・フラグ・不変条件）の単体テスト 4h | 6h |
+
+**compose の検証の完了ライン**（手作業で通れば完了。スクリプト化は別の作業として扱い、構成の切り替え判断の対象にはしない）
+1. 全コンテナが正常に起動し、BTCPay の管理画面が開ける。NBXplorer の同期が完了している（1.5h の確認地点）
+2. ストアと regtest のウォレットを作り、`BTC_JPY` の固定レートで JPY 建ての invoice を作れる。Speed Policy は 1 conf、期限は短く設定する（3h の確認地点）
+3. `bitcoin-cli` で支払い、ブロックを生成すると Settled になる
+4. `host.docker.internal:3000` の仮エンドポイント（Node の `http` で書いた20行程度のサーバー）で Webhook を受け取り、`BTCPay-Sig` ヘッダと生のボディをログに出せる。
+   **この仮エンドポイントは W1 の検証専用**。アプリ本体も port 3000 を使うので、W2 以降は BTCPay の Webhook 送信先をアプリ本体のエンドポイント（`/webhooks/btcpay`）に置き換え、仮エンドポイントは使わない
+5. `docker compose down -v` で全部消してから立ち上げ直しても、同じ手順で再現できる（5h の確認地点）
+
+**5時間で届かなかった場合**
+1. 予備から +2h 借りる。延長するのは、詰まっている段階の解決だけ
+2. それでも届かなければ、BTCPay の本体を v2.4.4 のソースからホストで `dotnet run` する（上限 3h）。CI で `setup-dotnet` とビルドが必要になる点を W4 の欄に書いておく
+3. 合計で10時間を使った時点で作業を止め、計画を立て直す
+
+**compose が延びた場合に後ろへずらす順番**
+- 週末の ① init と ② Prisma の検証は、必ずこの順で先に行う（Prisma の検証はテンプレートのスキーマの上で行うため）
+- 時間が押した場合は、④ スクリプト化 → ③ ポート固定・手動決済方法 → スキーマ本実装の一部、の順に W2 へ送る
+- ドメインの単体テスト（4h）は W1 に残す
+
+**Prisma の検証**（1.5h で区切る）: 循環参照する複合外部キーについて、`prisma validate` と `migrate dev` が通ること、
+生成された SQL に外部キーの定義が入っていること、3本のテスト（違反は失敗する／NULL のポインタは作れる／1つのトランザクションで作成できる）が通ることを確認する。
+1つでも通らなければ、リポジトリ層で検査する方式に切り替えて ADR 7 に記録する。
+
+**ADR を書くタイミング**: ADR 10 は compose の検証を終えた日、ADR 3 は雛形を作った日、ADR 7 は Prisma の検証を終えた日、ADR 2・6 は単体テストを書き終えた日。
+
+### 進捗と調整
 - **進捗確認**: 10/14（W2 の終わり）に、累計28時間分の作業が終わっているか確認する。
 - **遅れたときに削る順番**:
   1. デモ動画を GIF とスクリーンショットに変える
