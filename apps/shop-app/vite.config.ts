@@ -37,7 +37,10 @@ if (host === "localhost") {
 
 export default defineConfig({
   server: {
-    allowedHosts: [host],
+    // 既定の localhost だと IPv6 の ::1 だけで待ち受け、BTCPay（Docker）から host.docker.internal で届かない。
+    // 0.0.0.0 にすると LAN にも公開されるので、IPv4 のループバックに留める
+    host: "127.0.0.1",
+    allowedHosts: [host, "host.docker.internal"],
     cors: {
       preflightContinue: true,
     },
