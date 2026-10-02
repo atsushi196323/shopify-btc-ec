@@ -1,0 +1,111 @@
+# BTCPay Server regtest 環境（最小構成）
+#
+# bitcoind / nbxplorer / postgres の定義は、BTCPay Server v2.4.4 タグ時点の
+# BTCPayServer.Tests/docker-compose.yml から写したもの（Lightning・Tor・mailpit は除外）。
+# https://github.com/btcpayserver/btcpayserver/blob/v2.4.4/BTCPayServer.Tests/docker-compose.yml
+# btcpayserver の定義は btcpayserver-docker の docker-fragments/btcpayserver.yml を元にしている。
+#
+# 起動: docker compose -f infra/regtest/docker-compose.yml up -d
+# 管理画面: http://localhost:49392
+name: btcpay-regtest
+
+services:
+  btcpayserver:
+    image: btcpayserver/btcpayserver:2.4.4
+    restart: unless-stopped
+    ports:
+      - "49392:49392"
+    environment:
+      BTCPAY_POSTGRES: User ID=postgres;Include Error Detail=true;Host=postgres;Port=5432;Database=btcpayserver
+      BTCPAY_EXPLORERPOSTGRES: User ID=postgres;Include Error Detail=true;Host=postgres;Port=5432;Database=nbxplorer
+      BTCPAY_NETWORK: regtest
+      BTCPAY_BIND: 0.0.0.0:49392
+      BTCPAY_ROOTPATH: /
+      BTCPAY_CHAINS: btc
+      BTCPAY_BTCEXPLORERURL: http://nbxplorer:32838/
+      BTCPAY_DEBUGLOG: btcpay.log
+      BTCPAY_DOCKERDEPLOYMENT: "true"
+    # BTCPay から Webhook をホスト（アプリ / W1 の仮エンドポイント）に送るため。
+    # Docker Desktop では不要だが、Linux（CI）でも同じ名前で届くように明示する。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "btcpay_datadir:/datadir"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nbxplorer:
+        condition: service_started
+
+  nbxplorer:
+    image: nicolasdorier/nbxplorer:2.6.10
+    restart: unless-stopped
+    ports:
+      - "32838:32838"
+    environment:
+      NBXPLORER_NETWORK: regtest
+      NBXPLORER_CHAINS: "btc"
+      NBXPLORER_BTCRPCURL: http://bitcoind:43782/
+      NBXPLORER_BTCNODEENDPOINT: bitcoind:39388
+      NBXPLORER_BTCRPCUSER: ceiwHEbqWI83
+      NBXPLORER_BTCRPCPASSWORD: DwubwWsoo3
+      NBXPLORER_BIND: 0.0.0.0:32838
+      NBXPLORER_MINGAPSIZE: 5
+      NBXPLORER_MAXGAPSIZE: 10
+      NBXPLORER_VERBOSE: 1
+      NBXPLORER_POSTGRES: User ID=postgres;Include Error Detail=true;Host=postgres;Port=5432;Database=nbxplorer
+      NBXPLORER_EXPOSERPC: 1
+      NBXPLORER_NOAUTH: 1
+    # Postgres が接続を受け付ける前に起動すると、接続に失敗したまま止まるため healthy を待つ
+    depends_on:
+      bitcoind:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  bitcoind:
+    image: btcpayserver/bitcoin:31.1-1
+    restart: unless-stopped
+    environment:
+      BITCOIN_NETWORK: regtest
+      BITCOIN_WALLETDIR: "/data/wallets"
+      BITCOIN_EXTRA_ARGS: |-
+        rpcuser=ceiwHEbqWI83
+        rpcpassword=DwubwWsoo3
+        rpcport=43782
+        rpcbind=0.0.0.0:43782
+        rpcallowip=0.0.0.0/0
+        port=39388
+        whitelist=0.0.0.0/0
+        zmqpubrawblock=tcp://0.0.0.0:28332
+        zmqpubrawtx=tcp://0.0.0.0:28333
+        deprecatedrpc=signrawtransaction
+        fallbackfee=0.0002
+        minrelaytxfee=0.00001000
+        unsafesqlitesync=1
+    ports:
+      - "43782:43782"
+    volumes:
+      - "bitcoin_datadir:/data"
+
+  postgres:
+    image: postgres:18.1
+    # 他サービスと揃えないと、Docker 再起動時に postgres だけ復帰せず BTCPay / NBXplorer が接続エラーで落ちる
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
+    command: ["-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    ports:
+      - "39372:5432"
+    volumes:
+      - "postgres_datadir:/var/lib/postgresql"
+
+volumes:
+  bitcoin_datadir:
+  postgres_datadir:
+  btcpay_datadir:
