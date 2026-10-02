@@ -1,0 +1,2 @@
+# infra/regtest/bootstrap.sh が書き出す BTCPay の API キーと Webhook の secret
+infra/regtest/.bootstrap.env
