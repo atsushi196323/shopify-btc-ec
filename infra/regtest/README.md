@@ -1,7 +1,23 @@
 # regtest 環境の手動セットアップ手順
 
 `docker compose down -v` で全部消した状態から、JPY 建ての invoice を支払って Webhook を受け取るまでの手順。
-W1 の compose 検証（design.md 8章の完了ライン 1〜5）で使った。スクリプト化は W1 ④ / W2 で行う。
+W1 の compose 検証（design.md 8章の完了ライン 1〜5）で使った。
+
+## スクリプトで行う場合
+
+手順 1〜3（同期の確認・管理者・API キー・ストア・固定レート・ウォレット・Webhook の作成）は `bootstrap.sh` でまとめて行える。
+何度実行しても同じ状態になる。
+
+```sh
+docker compose -f infra/regtest/docker-compose.yml up -d
+infra/regtest/bootstrap.sh
+```
+
+作った値（`BTCPAY_URL`・`BTCPAY_API_KEY`・`BTCPAY_STORE_ID`・`BTCPAY_WEBHOOK_SECRET`）は `infra/regtest/.bootstrap.env` に書き出す（git には入れない）。
+
+**`down -v` の直後に実行すること。** BTCPay 2.4 系では、アカウント作成から5分たつと Greenfield API の Basic 認証が無効になり、
+API キーを新しく作れなくなる。`.bootstrap.env` を消してしまった場合は、`down -v` で作り直すか、
+管理画面の Account → API Keys で権限 unrestricted のキーを作り、`.bootstrap.env` に `BTCPAY_API_KEY=<キー>` と書いてから実行する。
 
 認証情報とレートはローカルの regtest 専用の値。
 
@@ -36,6 +52,7 @@ bitcoind のイメージは初回起動時に `default` ウォレットを作り
 curl -s -X POST $B/api/v1/users -H 'Content-Type: application/json' \
   -d '{"email":"admin@example.com","password":"Passw0rd!regtest","isAdministrator":true}'
 
+# Basic 認証は管理者の作成から5分で無効になるので、続けて実行する
 K=$(curl -s -u 'admin@example.com:Passw0rd!regtest' -X POST $B/api/v1/api-keys -H 'Content-Type: application/json' \
   -d '{"label":"regtest-dev","permissions":["unrestricted"]}' | jq -r .apiKey)
 H="Authorization: token $K"

@@ -37,6 +37,7 @@ Shopify の開発ストアに、BTCPay Server（regtest）を使った Bitcoin �
 ## ローカル環境
 - regtest 環境: `infra/regtest/docker-compose.yml`（bitcoind・NBXplorer・BTCPay・Postgres）
   - 起動: `docker compose -f infra/regtest/docker-compose.yml up -d`
+  - 初期設定: `infra/regtest/bootstrap.sh`（`down -v` の直後に実行する。値は `infra/regtest/.bootstrap.env` に出る）
   - BTCPay 管理画面: http://localhost:49392
   - 状態確認: `curl -s http://localhost:49392/api/v1/health` が `{"synchronized":true}` になること
   - Docker 再起動後に NBXplorer・BTCPay が DB 接続エラーで止まっていたら:
