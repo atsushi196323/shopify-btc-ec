@@ -32,3 +32,28 @@ model Session {
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
+
+// ADR 7: 「有効な試行 = Payment が指している試行」。
+// (currentAttemptId, id) → InvoiceAttempt(id, paymentId) の複合外部キーで、別の Payment の試行を指せないようにする。
+// W1 ② の検証用の最小構成。status やフラグは 10/5 のスキーマ本実装で足す。
+model Payment {
+  id               String  @id
+  shopifyOrderId   String  @unique
+  currentAttemptId String? @unique
+
+  currentAttempt InvoiceAttempt?  @relation("CurrentAttempt", fields: [currentAttemptId, id], references: [id, paymentId], onDelete: Restrict, onUpdate: Restrict)
+  attempts       InvoiceAttempt[] @relation("PaymentAttempts")
+
+  // Prisma は1対1のリレーションの参照元に UNIQUE を要求する。currentAttemptId が単独で UNIQUE なので、意味は変わらない
+  @@unique([currentAttemptId, id])
+}
+
+model InvoiceAttempt {
+  id        String @id
+  paymentId String
+
+  payment    Payment  @relation("PaymentAttempts", fields: [paymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  currentFor Payment? @relation("CurrentAttempt")
+
+  @@unique([id, paymentId])
+}

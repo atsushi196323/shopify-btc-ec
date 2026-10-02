@@ -24,6 +24,9 @@ src/adapters/       btcpay / shopify / db / shopify-fake
   上の `app/routes/` と `src/` は、どちらも `apps/shop-app/` からの相対パス。`tsconfig.json` の `include` が `**/*.ts` なので、`src/` は追加の設定なしで型検査の対象になる。
 - テンプレートはすでに Prisma（6.19.3）+ SQLite でセッションを保存している。決済のテーブルも同じ Prisma スキーマと DB に置き、`src/adapters/db/` から使う（DB を分けない）。
 - 管理画面のルーティングは `flatRoutes()`（ファイル名ベース）。Webhook 受信と拡張 API も `app/routes/` のファイルとして置く。
+- テストは `apps/shop-app/tests/{unit,adapter,integration}/` に置く（design.md のリポジトリ構成ではルートの `tests/`）。
+  依存パッケージが `apps/shop-app/node_modules` にあり、ルートからは解決できないため。ルートを npm workspaces にする手間を避けた（W1 ② で判断）。
+  テストランナーは vitest。`vite.config.ts` は React Router のプラグインを読み込むので、テスト用に `vitest.config.ts` を分けた。
 - リポジトリは1つのまま。`shopify app init` が `apps/shop-app/` の中に作る空の `.git` は削除した。
 - テンプレートのサンプル（商品作成のデモ、メタオブジェクト、`write_products` などのスコープ）は今は残し、必要なスコープが決まる W2 で整理する。
 
