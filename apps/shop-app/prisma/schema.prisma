@@ -14,46 +14,147 @@ datasource db {
 }
 
 model Session {
-  id            String    @id
-  shop          String
-  state         String
-  isOnline      Boolean   @default(false)
-  scope         String?
-  expires       DateTime?
-  accessToken   String
-  userId        BigInt?
-  firstName     String?
-  lastName      String?
-  email         String?
-  accountOwner  Boolean   @default(false)
-  locale        String?
-  collaborator  Boolean?  @default(false)
-  emailVerified Boolean?  @default(false)
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
 
+// 設計: docs/design.md 3章（データモデル）・4章（状態とフラグ）
+// SQLite の enum は TEXT として保存され、値の検査は Prisma Client が行う（DB に CHECK 制約はない）
+
+enum PaymentStatus {
+  CREATING
+  AWAITING_PAYMENT
+  CONFIRMING
+  PAID
+  EXPIRED
+  UNRESOLVED
+}
+
+enum ShopifySync {
+  PENDING
+  DONE
+}
+
+enum InvoiceAttemptStatus {
+  CREATING
+  NEW
+  PROCESSING
+  SETTLED
+  EXPIRED
+  INVALID
+}
+
+enum ReviewReason {
+  UNDERPAID
+  LATE_PAYMENT
+  DOUBLE_PAYMENT
+  INVALID_PAYMENT
+  OVERPAID
+}
+
+enum InboxSource {
+  BTCPAY
+}
+
+enum InboxStatus {
+  PENDING
+  DONE
+  FAILED
+}
+
 // ADR 7: 「有効な試行 = Payment が指している試行」。
 // (currentAttemptId, id) → InvoiceAttempt(id, paymentId) の複合外部キーで、別の Payment の試行を指せないようにする。
-// W1 ② の検証用の最小構成。status やフラグは 10/5 のスキーマ本実装で足す。
 model Payment {
-  id               String  @id
-  shopifyOrderId   String  @unique
-  currentAttemptId String? @unique
+  id               String        @id
+  shopifyOrderId   String        @unique
+  status           PaymentStatus @default(CREATING)
+  // 楽観ロック用。状態・フラグ・ポインタを変えるたびに +1 する
+  version          Int           @default(0)
+  currentAttemptId String?       @unique
+  // Shopify への反映待ち（design.md 4章）。status かフラグを変えるトランザクションで PENDING にする
+  shopifySync      ShopifySync   @default(DONE)
+  shopifySyncError String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   currentAttempt InvoiceAttempt?  @relation("CurrentAttempt", fields: [currentAttemptId, id], references: [id, paymentId], onDelete: Restrict, onUpdate: Restrict)
   attempts       InvoiceAttempt[] @relation("PaymentAttempts")
+  reviewFlags    ReviewFlag[]
 
   // Prisma は1対1のリレーションの参照元に UNIQUE を要求する。currentAttemptId が単独で UNIQUE なので、意味は変わらない
   @@unique([currentAttemptId, id])
+  @@index([shopifySync])
 }
 
 model InvoiceAttempt {
-  id        String @id
-  paymentId String
+  // BTCPay の invoice の orderId 欄にも入れる（試行単位の冪等性キー）
+  id              String               @id
+  paymentId       String
+  // CREATING の間は NULL
+  btcpayInvoiceId String?              @unique
+  status          InvoiceAttemptStatus @default(CREATING)
+  invalidatedByUs Boolean              @default(false)
+  invalidatedAt   DateTime?
+  // スイープの孤児回復は、CREATING のまま一定時間が経った試行を createdAt で探す
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
-  payment    Payment  @relation("PaymentAttempts", fields: [paymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  currentFor Payment? @relation("CurrentAttempt")
+  payment      Payment      @relation("PaymentAttempts", fields: [paymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  currentFor   Payment?     @relation("CurrentAttempt")
+  flags        ReviewFlag[] @relation("FlagAttempt")
+  relatedFlags ReviewFlag[] @relation("FlagRelatedAttempt")
 
   @@unique([id, paymentId])
+  @@index([status])
+}
+
+// フラグは同じ Payment の試行だけを指せるように、ポインタと同じく (attemptId, paymentId) の複合外部キーにする
+model ReviewFlag {
+  id               String       @id
+  paymentId        String
+  reason           ReviewReason
+  attemptId        String
+  // DOUBLE_PAYMENT のときの相手の試行
+  relatedAttemptId String?
+  detectedAt       DateTime     @default(now())
+  // 人が対応したら手で埋める
+  resolvedAt       DateTime?
+
+  payment        Payment         @relation(fields: [paymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  attempt        InvoiceAttempt  @relation("FlagAttempt", fields: [attemptId, paymentId], references: [id, paymentId], onDelete: Restrict, onUpdate: Restrict)
+  relatedAttempt InvoiceAttempt? @relation("FlagRelatedAttempt", fields: [relatedAttemptId, paymentId], references: [id, paymentId], onDelete: Restrict, onUpdate: Restrict)
+
+  // 不変条件5: 対応済みのフラグと同じ事象を再検知しても、新しい行はできない
+  @@unique([paymentId, reason, attemptId])
+}
+
+// ADR 8: 署名を検証した Webhook を保存し、ワーカーが処理する
+model Inbox {
+  id         String      @id
+  source     InboxSource
+  eventId    String
+  payload    String
+  status     InboxStatus @default(PENDING)
+  attempts   Int         @default(0)
+  lastError  String?
+  receivedAt DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@unique([source, eventId])
+  @@index([status])
 }

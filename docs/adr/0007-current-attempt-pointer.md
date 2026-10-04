@@ -33,6 +33,20 @@
   - Payment → 試行 → ポインタの設定を、1つのトランザクションで行える
   - 別の Payment の試行を指すと、外部キー違反（P2003）で失敗する。Prisma の接続で `PRAGMA foreign_keys` が 1 になっていることも確かめた
 
+## スキーマの本実装で判断したこと（2026-10-04）
+design.md 3章に書いていない細部を、実装中に次のとおり決めた。
+- **フラグも同じ方式で守る**: ReviewFlag の `(attemptId, paymentId)` と `(relatedAttemptId, paymentId)` から
+  InvoiceAttempt `(id, paymentId)` を複合外部キーで参照し、別の Payment の試行を指すフラグを作れないようにした。
+  `relatedAttemptId` が NULL の間は MATCH SIMPLE により検査されない。
+- **主キーとタイムスタンプを足した**: ReviewFlag と Inbox に `id`、Payment と InvoiceAttempt に `createdAt` / `updatedAt`、
+  Inbox に `receivedAt` / `updatedAt`。スイープの孤児回復（design.md 5.5 の 1）は、試行の `createdAt` で「一定時間が経った」を判定する。
+- **`shopifySync` の既定値は DONE**: 作成時点では Shopify に反映するものがない。status かフラグを変えるときだけ PENDING にする。
+- **`btcpayInvoiceId` は UNIQUE**: 同じ invoice を2つの試行に紐づけられないようにする（CREATING の間の NULL は重複してよい）。
+- **状態の値は Prisma の enum**: SQLite では TEXT として保存され、値の検査は Prisma Client が行う（DB に CHECK 制約はない）。
+  CHECK 制約を足すには手書きのマイグレーションが要るので、部分ユニークインデックスと同じ理由で見送った。
+- `tests/adapter/db/review-flag-and-inbox.test.ts` で、フラグの複合外部キー違反（P2003）、
+  不変条件5のユニーク制約、Inbox の `(source, eventId)` の重複（P2002）が失敗することを確かめた。
+
 ## 結果
 - 再発行は、同じトランザクションの中でポインタを付け替えるだけで済む。
 - Postgres に移行しても同じ形のまま使える。
