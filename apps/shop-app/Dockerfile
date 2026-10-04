@@ -7,12 +7,10 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-COPY package.json package-lock.json* ./
-
-RUN npm ci --omit=dev && npm cache clean --force
-
+# パッケージマネージャは pnpm に揃える（package.json の packageManager）。
+# pnpm-workspace.yaml が extensions/* を含むので、全体をコピーしてから入れる
 COPY . .
 
-RUN npm run build
+RUN corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm run build && pnpm prune --prod
 
-CMD ["npm", "run", "docker-start"]
+CMD ["pnpm", "run", "docker-start"]
