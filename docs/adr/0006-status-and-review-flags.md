@@ -1,6 +1,6 @@
 # ADR 6: 状態と review フラグを分ける
 
-- ステータス: 提案（下書き。W1 の実装時に確定。W3 で直列化の部分を追記）
+- ステータス: 承認（2026-10-04、ドメインの単体テストで確認。W3 で直列化の部分を追記）
 - 日付: 2026-10-01
 
 ## コンテキスト
@@ -42,6 +42,25 @@ status かフラグが変わったら PENDING にし、反映が追いついた�
 同じ Payment のイベントを2つのワーカーが同時に処理すると、両方が「相手はまだ支払われていない」と判断し、
 DOUBLE_PAYMENT を検知できない。そこで、**Payment の `version` 列による楽観ロック**で Payment 単位に直列化する。
 競合したら DB を読み直して再判定する。悲観ロック（`SELECT ... FOR UPDATE`）は SQLite に相当する機能がなく、移植性が落ちるので採用しない。
+
+## ドメインの実装で判断したこと（2026-10-04）
+`src/domain/` の実装中に、design.md 4章に書いていない細部を次のとおり決めた。
+- **試行の NEW → INVALID を許す**: 4章の図は INVALID を PROCESSING の下にだけ描いているが、こちらで無効化した未入金の invoice は
+  Greenfield で INVALID に見える。これを受け入れないと試行が NEW のまま残り、スイープが無効化を繰り返す。
+- **途中を飛ばす遷移を許す**: Webhook を取りこぼすと途中の状態を見ないので、試行も Payment も「遷移表で前に到達できるなら進める」とした。
+  Payment は遷移表のイベント起点の辺だけで判定し、EXPIRED → CREATING（再発行）は `reissue()` だけが行う。
+- **入金の有無は導出する**: 試行に「入金あり」の列は持たず、試行の状態（PROCESSING・SETTLED）か、その試行に付いた
+  UNDERPAID / LATE_PAYMENT / DOUBLE_PAYMENT / OVERPAID のフラグから導出する。INVALID_PAYMENT は入金が取り消されたので含めない。
+- **DOUBLE_PAYMENT の「後」**: 入金を初めて検知した時点で、ほかの試行に入金があれば、検知した側に付ける。
+  一度入金を記録した試行を再処理しても付けないので、どの順番でもちょうど1件になる。
+- **BTCPay の状態はアダプタで変換する**: ドメインは `InvoiceObservation`（試行の状態と、入金の様子 NONE / PARTIAL / FULL / OVER / LATE）だけを受け取る。
+  BTCPay の additionalStatus からの変換は W2 のアダプタで行う。支払い方法に依存しないので、Lightning を足しても形は変わらない（ADR 2）。
+- 単体テスト（`tests/unit/domain/`）: 試行と Payment の全組（前に進む組と、無効な組）、4章の表の各行、
+  1つの試行に観測を3回当てる全組み合わせ（25³通り）と、再発行後の2つの試行への全組み合わせで不変条件1・2・5を確認した。
+  二重払いはすべての処理順で DOUBLE_PAYMENT がちょうど1件になり、status は順番によって PAID か UNRESOLVED になる。
+  逆向きも確認した。片方にしか入金がないのに DOUBLE_PAYMENT が残るのは、相手の入金が後から取り消された（INVALID_PAYMENT）場合だけで、
+  そのとき status は UNRESOLVED になる。フラグは事象の記録なので、取り消されても消さない。
+  `src/domain/` が domain の外を import しないこと（ADR 3）もテストで確認している。
 
 ## 検討した代替案
 - **UNRESOLVED から PAID への遷移を許して、結果を揃える**: UNRESOLVED が終端でなくなり、状態機械が複雑になる。
