@@ -357,6 +357,8 @@ Shopify の Webhook（`orders/create`）は、MVP では inbox を通さない�
 - 二重払いのとき、status は処理の順番によって PAID にも UNRESOLVED にもなる（DOUBLE_PAYMENT フラグは必ず付く）。
 - MVP ではフラグを対応済みにしてもタグは自動で外れない。
 - ワーカーは同じアプリ内の簡易版で、水平スケールは考慮していない。
+- BTCPay の管理画面などで、入金のない現在の invoice をアプリの外から無効化すると、試行は INVALID（終端）になるが
+  Payment は AWAITING_PAYMENT のまま進まず、再発行（EXPIRED のときだけ受け付ける）もできない。invoice の無効化はアプリだけが行う前提とする。
 
 ## ADR 一覧
 
