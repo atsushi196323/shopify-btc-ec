@@ -1,0 +1,16 @@
+# ADR 1 の未検証事項の確認用（W2）: Thank you ページの拡張から、アプリの API を呼べるか
+api_version = "2026-07"
+
+[[extensions]]
+name = "thank-you"
+handle = "thank-you"
+type = "ui_extension"
+uid = "1874372e-3f74-0011-137d-2b0397001c59c6e6a704"
+
+[[extensions.targeting]]
+module = "./src/Checkout.jsx"
+target = "purchase.thank-you.customer-information.render-after"
+
+[extensions.capabilities]
+# fetch() でアプリの API を呼ぶ。公開には Dev Dashboard での承認が要る
+network_access = true
