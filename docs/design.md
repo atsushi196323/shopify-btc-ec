@@ -93,6 +93,7 @@ InvoiceAttempt
   status             CREATING | NEW | PROCESSING | SETTLED | EXPIRED | INVALID
   invalidatedByUs    boolean
   invalidatedAt      NULL 可
+  paymentDetected    boolean（この試行で入金を観測したか。NEW のままの一部入金を残すため。ADR 6）
   @@unique([id, paymentId])
 
 ReviewFlag
@@ -166,7 +167,7 @@ Greenfield で取り直した状態が古くても、遷移が前にしか進ま
 
 | 新しい試行の状態 | 処理 |
 |---|---|
-| 未入金（Payment が AWAITING_PAYMENT） | 新しい invoice を Greenfield で無効化（`invalidatedByUs = true`）し、Payment を UNRESOLVED にする。フラグは LATE_PAYMENT |
+| 未入金（Payment が AWAITING_PAYMENT で、一部入金もない） | 新しい invoice を Greenfield で無効化（`invalidatedByUs = true`）し、Payment を UNRESOLVED にする。フラグは LATE_PAYMENT |
 | 入金済みで承認待ち（CONFIRMING） | 無効化しない。DOUBLE_PAYMENT を付け、Settled になったら PAID |
 | PAID | DOUBLE_PAYMENT を付ける |
 
@@ -260,7 +261,7 @@ Shopify の Webhook（`orders/create`）は、MVP では inbox を通さない�
 | 期限後の入金 | 自動では支払い済みにしない。UNRESOLVED + LATE_PAYMENT |
 | CONFIRMING の間に Invalid（二重支払い・RBF） | UNRESOLVED + INVALID_PAYMENT |
 | 古い試行と新しい試行の両方に入金 | DOUBLE_PAYMENT（4章の表に従う） |
-| PAID の後に Invalid（reorg） | 方針: PAID のまま INVALID_PAYMENT を付ける。テストは stretch |
+| PAID の後に Invalid（reorg） | 方針: PAID のまま INVALID_PAYMENT を付ける。MVP の実装では何もしない（SETTLED を終端にしている）。実装とテストは stretch |
 | 注文の自動キャンセル | stretch |
 
 ## 7. テスト戦略
@@ -346,7 +347,7 @@ Shopify の Webhook（`orders/create`）は、MVP では inbox を通さない�
   3. 注文の自動キャンセル
   4. Lightning
   5. 構造化ログとメトリクス
-  6. その他: フラグからタグを再計算して同期する処理、reorg のテスト
+  6. その他: フラグからタグを再計算して同期する処理、reorg の実装とテスト
 
 ## 9. 既知の制限（README に転記する）
 - ゲスト購入では、注文と購入者を強く結びつけられない。拡張 API が返す情報を最小限にすることで、このリスクを受け入れる。
@@ -361,7 +362,8 @@ Shopify の Webhook（`orders/create`）は、MVP では inbox を通さない�
   Payment は AWAITING_PAYMENT のまま進まず、再発行（EXPIRED のときだけ受け付ける）もできない。invoice の無効化はアプリだけが行う前提とする。
 - 同じく、BTCPay の管理画面で invoice を手で Settled・Invalid にする操作（Mark as settled / invalid）は行わない前提とする。
   手で Settled にすると、入金がなくても PAID になり、Shopify の注文も支払い済みになる。手で Invalid にした invoice は、
-  入金を観測する前に無効化されると、入金を見落とす。
+  アプリが入金を観測していれば INVALID_PAYMENT で人の対応に回るが、観測する前なら入金を見落とす。
+- PAID の後に入金が reorg で無効になっても、MVP では何もしない（フラグも付かない）。方針（INVALID_PAYMENT を付ける）は ADR 9 にあり、実装は stretch。
 
 ## ADR 一覧
 
