@@ -359,6 +359,9 @@ Shopify の Webhook（`orders/create`）は、MVP では inbox を通さない�
 - ワーカーは同じアプリ内の簡易版で、水平スケールは考慮していない。
 - BTCPay の管理画面などで、入金のない現在の invoice をアプリの外から無効化すると、試行は INVALID（終端）になるが
   Payment は AWAITING_PAYMENT のまま進まず、再発行（EXPIRED のときだけ受け付ける）もできない。invoice の無効化はアプリだけが行う前提とする。
+- 同じく、BTCPay の管理画面で invoice を手で Settled・Invalid にする操作（Mark as settled / invalid）は行わない前提とする。
+  手で Settled にすると、入金がなくても PAID になり、Shopify の注文も支払い済みになる。手で Invalid にした invoice は、
+  入金を観測する前に無効化されると、入金を見落とす。
 
 ## ADR 一覧
 
