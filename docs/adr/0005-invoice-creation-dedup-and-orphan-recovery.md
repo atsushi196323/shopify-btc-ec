@@ -34,3 +34,13 @@ BTCPay にだけ invoice が残る（孤児）。
 - 「外部の副作用はトランザクションに入らない」という問題を、予約と照合の組み合わせで扱う。
 - テスト: シナリオ7（競合）、シナリオ8（初回の作成と再発行の両方のクラッシュ回復）。
 - W2 の確認項目: BTCPay の支払い画面に `orderId`（attemptId）が表示されるか。表示される場合の見え方を決める。
+
+## W2 で確認したこと（2026-10-05、BTCPay アダプタ）
+- **支払い画面に `orderId` は表示されない**: BTCPay 2.4 の支払い画面は、`orderId` をページに埋め込んだ JSON（`srvModel`）に持つだけで、
+  テンプレートと `checkout.js` のどちらも表示に使っていない（ページの HTML とスクリプトで確認した）。
+  購入者に attemptId の見え方を説明する必要はない。ページのソースには UUID が見えるが、それだけでは注文に結びつかない。
+- invoice の作成では `metadata.orderId` に attemptId、`metadata.shopifyOrderId` に Shopify の注文 ID を入れる。
+  `GET invoices?orderId=<attemptId>` の結果は、アダプタでも `metadata.orderId` の完全一致で絞る。
+- ストアにない invoice の取得は、404 ではなく 403 が返る（権限の検査で弾かれる）。「見つからない」と「権限がない」を区別できないので、
+  孤児の回復では取得ではなく検索（0件なら作成を再試行）を使う。
+- 本物の BTCPay に対するアダプタのテストは `tests/integration/btcpay/` に置き、`pnpm test:integration` で流す（`pnpm test` には含めない）。

@@ -62,6 +62,16 @@ DOUBLE_PAYMENT を検知できない。そこで、**Payment の `version` 列�
   そのとき status は UNRESOLVED になる。フラグは事象の記録なので、取り消されても消さない。
   `src/domain/` が domain の外を import しないこと（ADR 3）もテストで確認している。
 
+## BTCPay の状態の変換（2026-10-05、W2 のアダプタ）
+`src/adapters/btcpay/invoice-observation.ts` で、Greenfield の `status` / `additionalStatus` を `InvoiceObservation` に変換する。
+- status はそのまま写す（New → NEW など）。`additionalStatus` は PaidPartial → PARTIAL、PaidOver → OVER、PaidLate → LATE。
+- Processing と Settled は全額が届いているので、過払いでなければ FULL とする。
+- Marked（管理画面で手動で変えた）と Invalid は入金の様子を表さないので NONE とする。管理画面で手で状態を変えない前提は、design.md 9章の既知の制限に書いた。
+- 知らない値は推測で変換せず、例外にする（inbox の再処理に任せる）。
+- regtest で、全額 → PROCESSING・FULL → 1ブロックで SETTLED・FULL、過払い → PROCESSING・OVER、一部入金 → NEW・PARTIAL を確認した。
+  期限切れ（PARTIAL・LATE）と INVALID は W3 のシナリオ 2〜4 と ADR 9 の未検証事項で確認する。
+  特に、入金のある invoice が Invalid になったとき `additionalStatus` から入金の有無が読めない場合は、支払い額の取得を足す必要がある。
+
 ## 検討した代替案
 - **UNRESOLVED から PAID への遷移を許して、結果を揃える**: UNRESOLVED が終端でなくなり、状態機械が複雑になる。
 - **OVERPAID をフラグではなく情報として記録するだけにする**: フラグの種類を1つに統一したほうが単純なので、フラグに入れた。
