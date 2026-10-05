@@ -44,3 +44,8 @@ src/adapters/       btcpay / shopify / db / shopify-fake
 - pnpm に揃え、`package-lock.json` を削除した。`package.json` に `packageManager: pnpm@11.0.9` を書き、CI（W4）は corepack で同じ版を使う。
 - 拡張（`extensions/*`）は pnpm のワークスペースとして同じロックファイルで管理する。
 - テンプレートの `Dockerfile` と `docker-start` も pnpm に直した。Docker でのデプロイは対象外なので、ビルドの確認はしていない。
+
+## 追記（2026-10-05）: Admin API のバージョンを 2026-07 に揃える
+テンプレートの `shopify.app.toml` の Webhook は `api_version = "2027-01"`（正式リリースは2027年1月で、10/5 時点では安定版ではない）で、
+アプリ本体（`ApiVersion.July26`）と Thank you 拡張（`2026-07`）とずれていた。Webhook のペイロードと codegen の型が別のバージョンになるので、
+すべて安定版の **2026-07** に揃えた。バージョンを上げるときは、この3か所を同時に変える。
