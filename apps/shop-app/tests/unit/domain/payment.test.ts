@@ -12,8 +12,14 @@ import {
 import type { InvoiceAttemptStatus } from "../../../src/domain/invoice-attempt";
 import type { ReviewFlag } from "../../../src/domain/review-flag";
 
-function attempt(id: string, status: InvoiceAttemptStatus, invalidatedByUs = false): AttemptState {
-  return { id, status, invalidatedByUs };
+// PROCESSING と SETTLED の試行は、そこに至るまでに入金を検知している
+function attempt(
+  id: string,
+  status: InvoiceAttemptStatus,
+  invalidatedByUs = false,
+  paymentDetected = status === "PROCESSING" || status === "SETTLED",
+): AttemptState {
+  return { id, status, invalidatedByUs, paymentDetected };
 }
 
 function payment(
@@ -69,7 +75,7 @@ describe("現在の試行の観測", () => {
 
     expect(result.state.status).toBe("AWAITING_PAYMENT");
     expect(result.state.attempts[0].status).toBe("NEW");
-    expect(result).toMatchObject({ statusChanged: true, attemptStatusChanged: true, needsShopifySync: true });
+    expect(result).toMatchObject({ statusChanged: true, attemptChanged: true, needsShopifySync: true });
   });
 
   it("AWAITING_PAYMENT → CONFIRMING → PAID: 現在の試行が PROCESSING → SETTLED", () => {
@@ -208,7 +214,7 @@ describe("無効な遷移と冪等性", () => {
     const result = applyObservation(state, "a1", observe("PROCESSING", "FULL"));
 
     expect(result.state).toEqual(state);
-    expect(result).toMatchObject({ statusChanged: false, attemptStatusChanged: false, needsShopifySync: false });
+    expect(result).toMatchObject({ statusChanged: false, attemptChanged: false, needsShopifySync: false });
   });
 
   it("同じ観測を2回当てても、2回目は何も変えない", () => {

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { INVOICE_ATTEMPT_STATUSES, canAdvance } from "../../../src/domain/invoice-attempt";
+import {
+  INVOICE_ATTEMPT_STATUSES,
+  advanceAttempt,
+  canAdvance,
+  type InvoiceAttemptStatus,
+} from "../../../src/domain/invoice-attempt";
 import {
   applyObservation,
   canPaymentAdvance,
@@ -61,13 +66,13 @@ function sequences<T>(items: T[], length: number): T[][] {
 const fresh: PaymentState = {
   status: "CREATING",
   currentAttemptId: "a1",
-  attempts: [{ id: "a1", status: "CREATING", invalidatedByUs: false }],
+  attempts: [{ id: "a1", status: "CREATING", invalidatedByUs: false, paymentDetected: false }],
   flags: [],
 };
 
 function reissuedFromExpired(): PaymentState {
   const result = reissue(
-    { ...fresh, status: "EXPIRED", attempts: [{ id: "a1", status: "EXPIRED", invalidatedByUs: false }] },
+    { ...fresh, status: "EXPIRED", attempts: [{ id: "a1", status: "EXPIRED", invalidatedByUs: false, paymentDetected: false }] },
     "a2",
   );
   if (!result.ok) throw new Error("再発行に失敗した");
@@ -90,9 +95,32 @@ describe("不変条件（網羅）", () => {
 
   it("再発行の後: 2つの試行に観測を3回当てる全組み合わせで、両方に入金があれば DOUBLE_PAYMENT がちょうど1件付く（不変条件2）", () => {
     const steps: Step[] = ["a1", "a2"].flatMap((attemptId) => OBSERVATIONS.map((observation) => ({ attemptId, observation })));
+    // 入金の有無は hasPayment に頼らず、当てた観測から判定する（hasPayment 自体の見落としを検出するため）。
+    // 入金額の観測があるか、試行が実際に PROCESSING・SETTLED に進んだら入金とみなす（前に進まない古い観測は数えない）
+    const observedPayment = (sequence: Step[], attemptId: string) => {
+      let status: InvoiceAttemptStatus = attemptId === "a1" ? "EXPIRED" : "CREATING";
+      return sequence.some(({ attemptId: id, observation }) => {
+        if (id !== attemptId) return false;
+        status = advanceAttempt(status, observation.status);
+        return observation.received !== "NONE" || status === "PROCESSING" || status === "SETTLED";
+      });
+    };
+    const isInvalid = (state: PaymentState, attemptId: string) =>
+      state.attempts.find((attempt) => attempt.id === attemptId)!.status === "INVALID";
+
     for (const sequence of sequences(steps, 3)) {
       const state = run(reissuedFromExpired(), sequence);
       const doubles = state.flags.filter((flag) => flag.reason === "DOUBLE_PAYMENT");
+      expect(doubles.length).toBeLessThanOrEqual(1);
+      // 両方に入金を観測し、どちらの入金も取り消されていない（INVALID でない）なら、必ず付く
+      if (
+        observedPayment(sequence, "a1") &&
+        observedPayment(sequence, "a2") &&
+        !isInvalid(state, "a1") &&
+        !isInvalid(state, "a2")
+      ) {
+        expect(doubles, JSON.stringify(sequence)).toHaveLength(1);
+      }
       if (hasPayment(state, "a1") && hasPayment(state, "a2")) {
         expect(doubles).toHaveLength(1);
       } else if (doubles.length > 0) {
@@ -106,6 +134,29 @@ describe("不変条件（網羅）", () => {
     }
     // 50³ 通りを回すので、既定の 5 秒では足りない
   }, 30_000);
+});
+
+describe("新しい試行への一部入金（不変条件2）", () => {
+  // a2 に一部入金（NEW のまま）があった後に、古い a1 への期限後の入金を処理する
+  it("a2 の一部入金を記録しているので、DOUBLE_PAYMENT を付け、a2 の invoice は無効化しない", () => {
+    let state = reissuedFromExpired();
+    state = applyObservation(state, "a2", { status: "NEW", received: "PARTIAL" }).state;
+
+    const result = applyObservation(state, "a1", { status: "EXPIRED", received: "LATE" });
+
+    expect(result.newFlags).toEqual([{ reason: "DOUBLE_PAYMENT", attemptId: "a1", relatedAttemptId: "a2" }]);
+    expect(result.attemptToInvalidate).toBeNull();
+    expect(result.state.status).toBe("AWAITING_PAYMENT");
+  });
+
+  it("一部入金のあとに外から無効化されたら、INVALID_PAYMENT を付けて人の対応に回す", () => {
+    const state = applyObservation(fresh, "a1", { status: "NEW", received: "PARTIAL" }).state;
+
+    const result = applyObservation(state, "a1", { status: "INVALID", received: "NONE" });
+
+    expect(result.newFlags).toEqual([{ reason: "INVALID_PAYMENT", attemptId: "a1", relatedAttemptId: null }]);
+    expect(result.state.status).toBe("UNRESOLVED");
+  });
 });
 
 describe("二重払いの処理順（不変条件2・3）", () => {

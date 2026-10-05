@@ -110,6 +110,8 @@ model InvoiceAttempt {
   status          InvoiceAttemptStatus @default(CREATING)
   invalidatedByUs Boolean              @default(false)
   invalidatedAt   DateTime?
+  // この試行で入金を観測したか。NEW のままの一部入金を、DOUBLE_PAYMENT の判定に使うために残す（ADR 6）
+  paymentDetected Boolean              @default(false)
   // スイープの孤児回復は、CREATING のまま一定時間が経った試行を createdAt で探す
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt

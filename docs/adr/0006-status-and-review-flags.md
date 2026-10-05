@@ -62,6 +62,18 @@ DOUBLE_PAYMENT を検知できない。そこで、**Payment の `version` 列�
   そのとき status は UNRESOLVED になる。フラグは事象の記録なので、取り消されても消さない。
   `src/domain/` が domain の外を import しないこと（ADR 3）もテストで確認している。
 
+## 一部入金を試行の列に残す（2026-10-05、コードレビューで判明）
+上の「入金の有無は導出する」を一部改め、試行に `paymentDetected`（この試行で入金を観測したか）を持つ。
+- **理由**: NEW のままの一部入金（NEW・PARTIAL）は、試行の状態にもフラグにも残らない。再発行した a2 に一部入金があった後に
+  古い a1 への期限後の入金を処理すると、a2 を「未入金」とみなして LATE_PAYMENT だけを付け、一部入金のある a2 の invoice を無効化していた。
+  DOUBLE_PAYMENT が付かず、不変条件2が破れる。
+- **決定**: `applyObservation` が入金を観測したら `paymentDetected` を立てる。`hasPayment` は、従来の導出に加えてこの列を見る。
+  ただし INVALID になった試行の入金は、従来どおり取り消されたものとして数えない（フラグに残った入金は数える）。
+  一部入金のあとに外から Invalid になった試行は、これで INVALID_PAYMENT を付けて人の対応に回る。
+- 結果の `attemptStatusChanged` は `attemptChanged` に改め、`paymentDetected` が変わったときも true にする（試行の行の保存が必要なため）。
+- **テスト**: 不変条件2の網羅テストは、入金の有無を `hasPayment` で判定していたので、この見落としを検出できなかった。
+  当てた観測から独立に判定する検査を足し、修正前のコードで失敗することを確かめた。
+
 ## BTCPay の状態の変換（2026-10-05、W2 のアダプタ）
 `src/adapters/btcpay/invoice-observation.ts` で、Greenfield の `status` / `additionalStatus` を `InvoiceObservation` に変換する。
 - status はそのまま写す（New → NEW など）。`additionalStatus` は PaidPartial → PARTIAL、PaidOver → OVER、PaidLate → LATE。
@@ -77,5 +89,5 @@ DOUBLE_PAYMENT を検知できない。そこで、**Payment の `version` 列�
 - **OVERPAID をフラグではなく情報として記録するだけにする**: フラグの種類を1つに統一したほうが単純なので、フラグに入れた。
 
 ## 結果
-- PAID の後に起きる異常（DOUBLE_PAYMENT、reorg による INVALID_PAYMENT）を、状態を壊さずに記録できる。
+- PAID の後に起きる異常（DOUBLE_PAYMENT）を、状態を壊さずに記録できる。reorg による INVALID_PAYMENT も同じ形で記録できるが、MVP では実装しない（SETTLED を終端にしている。design.md 9章）。
 - テスト: 単体テストで全遷移を検証する。シナリオ9（二重払いを並列に処理してもフラグがちょうど1件）。

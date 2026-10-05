@@ -26,7 +26,7 @@
 | 古い試行に期限後の入金があり、新しい試行が未入金 | 新しい invoice を無効化し、UNRESOLVED + LATE_PAYMENT |
 | 古い試行に期限後の入金があり、新しい試行が CONFIRMING | 無効化しない。DOUBLE_PAYMENT を付け、Settled になったら PAID |
 | 古い試行に期限後の入金があり、新しい試行が PAID | DOUBLE_PAYMENT |
-| PAID の後に Invalid（reorg） | PAID のまま INVALID_PAYMENT を付ける（方針のみ。テストは stretch） |
+| PAID の後に Invalid（reorg） | PAID のまま INVALID_PAYMENT を付ける（方針のみ。MVP の実装では何もしない。実装とテストは stretch） |
 
 ### 自分で無効化した invoice
 - 無効化は commit の後に行う外部呼び出し。失敗したら、スイープが

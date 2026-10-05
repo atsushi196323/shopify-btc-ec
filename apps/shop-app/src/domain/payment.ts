@@ -27,6 +27,8 @@ export type AttemptState = {
   id: string;
   status: InvoiceAttemptStatus;
   invalidatedByUs: boolean;
+  // この試行で入金を観測したか。NEW のままの一部入金は状態にもフラグにも残らないので、ここに記録する（ADR 6）
+  paymentDetected: boolean;
 };
 
 export type PaymentState = {
@@ -47,7 +49,8 @@ export type ObservationResult = {
   state: PaymentState;
   newFlags: NewReviewFlag[];
   statusChanged: boolean;
-  attemptStatusChanged: boolean;
+  // 試行の状態か paymentDetected が変わった（試行の行を保存する必要がある）
+  attemptChanged: boolean;
   // status かフラグが変わったら、Shopify への反映待ち（shopifySync = PENDING）にする
   needsShopifySync: boolean;
   // UNRESOLVED になったのに現在の試行が未入金のまま有効なら、その invoice を無効化する
@@ -57,12 +60,13 @@ export type ObservationResult = {
 // 試行に入金があったことを示すフラグ。INVALID_PAYMENT（二重支払い・RBF）は入金が取り消されたので含めない
 const PAYMENT_EVIDENCE: readonly ReviewReason[] = ["UNDERPAID", "LATE_PAYMENT", "DOUBLE_PAYMENT", "OVERPAID"];
 
-// 試行に入金があったか。試行の状態か、その試行に付いたフラグから導出する（専用の列は持たない）
+// 試行に入金があったか。INVALID になった試行の入金は、取り消されたものとして数えない（フラグに残った入金は数える）
 export function hasPayment(state: Pick<PaymentState, "attempts" | "flags">, attemptId: string): boolean {
   const attempt = findAttempt(state, attemptId);
   return (
     attempt.status === "PROCESSING" ||
     attempt.status === "SETTLED" ||
+    (attempt.paymentDetected && attempt.status !== "INVALID") ||
     state.flags.some((flag) => flag.attemptId === attemptId && PAYMENT_EVIDENCE.includes(flag.reason))
   );
 }
@@ -148,7 +152,9 @@ export function applyObservation(
     ...state,
     status: nextStatus,
     attempts: state.attempts.map((attempt) =>
-      attempt.id === attemptId ? { ...attempt, status: nextAttemptStatus } : attempt,
+      attempt.id === attemptId
+        ? { ...attempt, status: nextAttemptStatus, paymentDetected: attempt.paymentDetected || paidNow }
+        : attempt,
     ),
     flags: [...state.flags, ...newFlags.map((flag) => ({ ...flag, resolved: false }))],
   };
@@ -163,7 +169,7 @@ export function applyObservation(
     state: nextState,
     newFlags,
     statusChanged,
-    attemptStatusChanged: nextAttemptStatus !== before.status,
+    attemptChanged: nextAttemptStatus !== before.status || (paidNow && !before.paymentDetected),
     needsShopifySync: statusChanged || newFlags.length > 0,
     attemptToInvalidate: attemptToInvalidate(nextState),
   };
@@ -183,7 +189,7 @@ export function reissue(state: PaymentState, newAttemptId: string): ReissueResul
       ...state,
       status: "CREATING",
       currentAttemptId: newAttemptId,
-      attempts: [...state.attempts, { id: newAttemptId, status: "CREATING", invalidatedByUs: false }],
+      attempts: [...state.attempts, { id: newAttemptId, status: "CREATING", invalidatedByUs: false, paymentDetected: false }],
     },
   };
 }
