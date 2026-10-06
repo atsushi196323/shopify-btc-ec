@@ -24,7 +24,7 @@
 - 統合テストは、**テストプロセスの中でアプリを組み立てる**（コンポジションルートを呼び、デコレータやフェイクを差し込む）。
 - compose に入れるのは依存サービス（bitcoind・NBXplorer・BTCPay・Postgres）だけ。
   BTCPay の Webhook はホスト上のテストプロセスに送る。CI（Linux）では `extra_hosts: host.docker.internal:host-gateway` を使う。
-- Shopify はフェイクのアダプタに差し替える。本物の API との食い違いは、GraphQL を Admin API のスキーマに対して codegen で型検査することで防ぐ。
+- Shopify はフェイクのアダプタに差し替える。本物の API との食い違いは、GraphQL を Admin API のスキーマに対して検証することで防ぐ（下の「codegen の代わりにスキーマで検証する」）。
 
 ### 役割分担
 | 検証したいこと | 担当 |
@@ -52,3 +52,16 @@
 - ローカル環境の制約: Docker の再起動による自動復帰では `depends_on` が効かない。postgres より先に NBXplorer が起動すると、
   NBXplorer は DB 接続に失敗したまま再試行しない。`docker compose up` から起動する CI には影響しないので、
   対策は README の復旧手順（`restart nbxplorer btcpayserver`）に留める。
+
+## codegen の代わりにスキーマで検証する（2026-10-05、W2 の Shopify アダプタ）
+テンプレートの codegen（`pnpm graphql-codegen`、`@shopify/api-codegen-preset`）は、スキーマの読み込みで
+`Cannot use GraphQLNonNull "String!" from another module or realm` になり、型を生成できなかった。
+ディスク上の `graphql` は 16.14.2 の1つだけで、設定ファイルを CommonJS にしても変わらなかった。
+ESM と CommonJS で別々に読み込まれている可能性が高いが、原因は特定していない（30分で区切った）。
+- **決定**: codegen は使わず、Admin API のスキーマを `apps/shop-app/graphql/admin-2026-07.graphql` に保存し（`pnpm schema:admin`、説明文を除いて約 770KB）、
+  アダプタのクエリをテストで検証する（`tests/adapter/shopify/`）。
+  - `graphql` の `validate` で、クエリがスキーマに対して妥当であること
+  - 結果の型は手で書き、各項目の null 許容がスキーマと一致すること
+- クエリにスキーマにない項目を入れた場合と、null 許容の違う項目に変えた場合に、テストが失敗することを確かめた。
+- 型の生成はしないので、クエリを変えたら結果の型も手で直す。食い違えば上の2つめのテストが失敗する。
+- codegen の修正は stretch（その他）に回す。

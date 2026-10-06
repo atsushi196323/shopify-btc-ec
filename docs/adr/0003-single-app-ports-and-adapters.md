@@ -49,3 +49,12 @@ src/adapters/       btcpay / shopify / db / shopify-fake
 テンプレートの `shopify.app.toml` の Webhook は `api_version = "2027-01"`（正式リリースは2027年1月で、10/5 時点では安定版ではない）で、
 アプリ本体（`ApiVersion.July26`）と Thank you 拡張（`2026-07`）とずれていた。Webhook のペイロードと codegen の型が別のバージョンになるので、
 すべて安定版の **2026-07** に揃えた。バージョンを上げるときは、この3か所を同時に変える。
+
+## 追記（2026-10-05）: テンプレートのサンプルを外し、スコープを決める
+- スコープは `read_orders,write_orders`。`read_orders` は注文の取得（ADR 4）、`write_orders` は W3 の `orderMarkAsPaid` とタグの付与に使う。
+  スコープを変えるとアプリの再承認が要るので、W3 の分も今まとめて入れた。
+- テンプレートのサンプル（商品作成のデモ、メタフィールド・メタオブジェクトの定義、追加のページ、`write_products` などのスコープ）を外した。
+  管理画面のトップは説明文だけのページにした。ナビゲーションはリンクが1つになるので外した。
+- Shopify とのやり取りは `src/application/ports/shopify-gateway.ts` のポートを通す。実装は `src/adapters/shopify/`（Admin GraphQL）と
+  `src/adapters/shopify-fake/`（統合テスト用、メモリ上の注文）。Admin GraphQL のクライアントはショップごとに認証が要るので、
+  アダプタは `admin.graphql` と同じ形の関数を受け取り、作る側（ルート）が認証を済ませる。

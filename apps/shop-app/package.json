@@ -19,7 +19,8 @@
     "vite": "vite",
     "typecheck": "react-router typegen && tsc --noEmit",
     "test": "vitest run",
-    "test:integration": "vitest run -c vitest.integration.config.ts"
+    "test:integration": "vitest run -c vitest.integration.config.ts",
+    "schema:admin": "node scripts/fetch-admin-schema.mjs"
   },
   "type": "module",
   "packageManager": "pnpm@11.0.9",

@@ -22,3 +22,11 @@ Thank you ページの拡張から、アプリの API（`POST /invoice {shopifyO
 
 ## 結果
 - invoice を作る経路は2つあるが（Webhook と拡張）、どちらも同じユースケースを通り、金額は同じ取得元から得る。
+
+## W2 で決めたこと（2026-10-05、Shopify アダプタ）
+- **請求額は `totalOutstandingSet.shopMoney`（未払いの残高、ショップの通貨）を使う**。
+  注文の合計ではなく残高を使うので、一部が別の方法で支払われた注文でも、二重に請求しない。
+  通貨はショップの通貨（開発ストアは JPY）。BTCPay のレートは `BTC_JPY` だけなので、JPY 以外の注文は invoice の作成で弾く（invoice の作成の実装で行う）。
+- 取得する項目は、支払い方法の名前（`paymentGatewayNames`）・`displayFinancialStatus`・`cancelledAt`・残高だけ。
+  名前・住所・メール・電話は取らないので、保護された顧客データは **Level 1** で足りる。
+  開発ストアでは審査は要らないが、ダッシュボードで申請の手順を済ませる必要がある。
