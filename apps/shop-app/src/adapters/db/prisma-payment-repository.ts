@@ -15,6 +15,10 @@ import type { PaymentState } from "../../domain/payment";
 const withCurrentAttempt = { currentAttempt: true } satisfies Prisma.PaymentInclude;
 type PaymentWithCurrentAttempt = Prisma.PaymentGetPayload<{ include: typeof withCurrentAttempt }>;
 
+// 接続が1本なので（ADR 7）、トランザクションは開始を待つ列に並ぶ。Prisma の既定（2秒）では、重なったときに待たずに失敗するので、
+// 通常のクエリの接続待ち（pool_timeout の既定 10 秒）に揃える
+const TRANSACTION_OPTIONS = { maxWait: 10_000 } as const;
+
 export class PrismaPaymentRepository implements PaymentRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
@@ -45,7 +49,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
           data: { currentAttemptId: attemptId },
           include: withCurrentAttempt,
         });
-      });
+      }, TRANSACTION_OPTIONS);
       return { reserved: true, payment: toSnapshot(payment) };
     } catch (error) {
       // shopifyOrderId の UNIQUE に負けた。勝った側の行は commit 済みなので、そのまま読んで返す
@@ -99,14 +103,15 @@ export class PrismaPaymentRepository implements PaymentRepository {
         where: { id: attemptId },
         data: { status: next.status, paymentDetected: next.paymentDetected },
       });
-      if (result.statusChanged || result.newFlags.length > 0) {
+      // status かフラグが変わったときだけ Payment を更新する。その条件はドメインの needsShopifySync に任せる
+      if (result.needsShopifySync) {
         // 書き込みロックを持っているので競合は起きないが、version の約束（読んだ値からの +1）を条件でも守る
         const updated = await tx.payment.updateMany({
           where: { id: payment.id, version: payment.version },
           data: {
             status: result.state.status,
             version: { increment: 1 },
-            ...(result.needsShopifySync ? { shopifySync: "PENDING" as const } : {}),
+            shopifySync: "PENDING",
           },
         });
         if (updated.count !== 1) throw new Error(`Payment ${payment.id} の version が読んだ後に変わった`);
@@ -115,7 +120,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
         });
       }
       return { attached: true, payment: toSnapshot(await findPayment(tx, payment.id)) };
-    });
+    }, TRANSACTION_OPTIONS);
   }
 }
 
