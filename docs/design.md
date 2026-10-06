@@ -269,7 +269,7 @@ Shopify の Webhook（`orders/create`）は、MVP では inbox を通さない�
 | 層 | 対象 | 依存 |
 |---|---|---|
 | 単体 | ドメインの全遷移と不正な遷移、フラグ、不変条件 | なし |
-| アダプタ | BTCPay の署名検証（既知のベクタ）、Shopify の GraphQL を codegen で型検査 | なし |
+| アダプタ | BTCPay の署名検証（既知のベクタ）、Shopify の GraphQL を保存した Admin API のスキーマで検証（ADR 10） | なし |
 | 統合 | 下の9シナリオ | 本物の BTCPay と bitcoind（regtest）、フェイクの Shopify |
 
 - 統合テストは**テストプロセスの中でアプリを組み立てる**。compose に入れるのは依存サービスだけ。
@@ -347,7 +347,7 @@ Shopify の Webhook（`orders/create`）は、MVP では inbox を通さない�
   3. 注文の自動キャンセル
   4. Lightning
   5. 構造化ログとメトリクス
-  6. その他: フラグからタグを再計算して同期する処理、reorg の実装とテスト
+  6. その他: フラグからタグを再計算して同期する処理、reorg の実装とテスト、テンプレートの codegen の修正（ADR 10）
 
 ## 9. 既知の制限（README に転記する）
 - ゲスト購入では、注文と購入者を強く結びつけられない。拡張 API が返す情報を最小限にすることで、このリスクを受け入れる。

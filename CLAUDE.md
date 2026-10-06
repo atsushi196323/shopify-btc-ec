@@ -29,7 +29,7 @@ Shopify の開発ストアに、BTCPay Server（regtest）を使った Bitcoin �
 
 ## テスト（ADR 10、design.md 7章）
 - 単体: ドメインの全遷移と不正な遷移、フラグ、不変条件。依存なし。
-- アダプタ: BTCPay の署名検証（既知のベクタ）、Shopify の GraphQL は codegen で型検査。
+- アダプタ: BTCPay の署名検証（既知のベクタ）、Shopify の GraphQL は保存した Admin API のスキーマ（`graphql/`）に対してテストで検証する（codegen は使わない。ADR 10）。
 - 統合: 本物の BTCPay と bitcoind（regtest）、フェイクの Shopify。アプリはテストプロセスの中で組み立てる。
 - 遅延や例外の注入は、BTCPay アダプタを包むテスト用デコレータで行う。本番コードにテスト用の分岐を入れない。
 - レートは BTCPay の rate rules で `BTC_JPY` を固定値にする。
