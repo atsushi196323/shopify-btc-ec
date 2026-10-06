@@ -30,3 +30,17 @@ Thank you ページの拡張から、アプリの API（`POST /invoice {shopifyO
 - 取得する項目は、支払い方法の名前（`paymentGatewayNames`）・`displayFinancialStatus`・`cancelledAt`・残高だけ。
   名前・住所・メール・電話は取らないので、保護された顧客データは **Level 1** で足りる。
   開発ストアでは審査は要らないが、ダッシュボードで申請の手順を済ませる必要がある。
+
+## W2 で決めたこと（2026-10-06、金額の検証）
+- 判断は `src/application/order-eligibility.ts` の `checkOrderEligibility` にまとめ、invoice を作る経路（`orders/create`・拡張・孤児回復の作り直し）はすべてここを通す。
+  invoice を作れない注文には Payment も作らない（結果は `NOT_ELIGIBLE` と理由）。
+- 確認する条件と順番:
+  1. `paymentGatewayNames` に「Bitcoin で支払う」を含む（ギフトカードとの併用もありうるので、一致ではなく包含で見る）
+  2. キャンセルされていない
+  3. `displayFinancialStatus` が `PENDING` か `PARTIALLY_PAID`（一部が別の方法で支払われた注文は残高だけを請求する）
+  4. 客に見せた通貨（`presentmentCurrencyCode`）と残高の通貨が、どちらも JPY。
+     残高（`shopMoney`）は常にショップの通貨なので、それだけでは客が別の通貨で注文したことを見落とす。このためクエリに `presentmentCurrencyCode` を加えた
+  5. 残高が0より大きい
+- 孤児回復で作り直す前にも確かめ直す。予約から時間が経つ間に、キャンセルや別の方法での支払いがありうるため。
+  確かめ直して作れなかった試行は CREATING のまま残す（既知の制限に記載）。
+- 支払い方法の名前「Bitcoin で支払う」はコードの定数で持つ。本物の API が返す値は `orders/create` をつなぐときに確かめる。

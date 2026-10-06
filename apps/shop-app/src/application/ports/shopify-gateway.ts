@@ -8,6 +8,8 @@ export type ShopifyOrder = {
   // Admin API の displayFinancialStatus（PENDING・PAID など）
   financialStatus: string;
   cancelled: boolean;
+  // 客に見せた通貨（presentmentCurrencyCode）。残高はショップの通貨なので、客が別の通貨で注文したかはこちらで確かめる
+  presentmentCurrencyCode: string;
   // 請求額。未払いの残高（totalOutstandingSet）をショップの通貨で持つ。10進数の文字列（例: "1000.0"）
   outstanding: { amount: string; currencyCode: string };
 };

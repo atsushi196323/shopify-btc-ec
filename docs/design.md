@@ -364,6 +364,10 @@ Shopify の Webhook（`orders/create`）は、MVP では inbox を通さない�
   手で Settled にすると、入金がなくても PAID になり、Shopify の注文も支払い済みになる。手で Invalid にした invoice は、
   アプリが入金を観測していれば INVALID_PAYMENT で人の対応に回るが、観測する前なら入金を見落とす。
 - PAID の後に入金が reorg で無効になっても、MVP では何もしない（フラグも付かない）。方針（INVALID_PAYMENT を付ける）は ADR 9 にあり、実装は stretch。
+- 孤児回復で作り直す前に注文を確かめ直し、キャンセル済み・支払い済みなどで invoice を作れなかった試行は、CREATING のまま残る。
+  スイープは回るたびにその試行を確かめ直し、拡張は「作成中」として待ち続ける（終わりの状態は設けていない。ADR 4）。
+- invoice を作った後に Shopify で注文がキャンセルされても、invoice は有効なまま残り、拡張も返し続ける。注文の自動キャンセルとあわせて stretch で扱う。
+- 手動決済方法の名前「Bitcoin で支払う」をコードで持っている。管理画面で名前を変えると、どの注文にも invoice が作られなくなる。
 
 ## ADR 一覧
 
