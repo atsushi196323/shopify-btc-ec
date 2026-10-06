@@ -6,19 +6,13 @@ import { AdminShopifyGateway, type AdminGraphql } from "../src/adapters/shopify/
 import type { InvoiceDeps } from "../src/application/create-invoice";
 import prisma from "./db.server";
 
-let btcpay: GreenfieldClient | undefined;
-
-// 設定は最初に使うときに読む。BTCPay の設定がなくても、管理画面などほかのルートは動くようにする
-function btcpayClient(): GreenfieldClient {
-  btcpay ??= new GreenfieldClient(loadGreenfieldConfig());
-  return btcpay;
-}
-
 // admin はショップごとに認証済みのクライアント（authenticate.webhook などが返す）
 export function invoiceDeps(admin: { graphql: AdminGraphql }): InvoiceDeps {
   return {
     payments: new PrismaPaymentRepository(prisma),
-    btcpay: btcpayClient(),
+    // 設定は呼ぶたびに読む。BTCPay の設定がなくても管理画面などほかのルートは動き、
+    // `down -v` と bootstrap.sh で API キーやストアが変わっても、アプリを再起動せずに追いつける
+    btcpay: new GreenfieldClient(loadGreenfieldConfig()),
     shopify: new AdminShopifyGateway(admin.graphql),
   };
 }

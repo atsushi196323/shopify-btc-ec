@@ -11,10 +11,12 @@ export function loadGreenfieldConfig(
   env: Record<string, string | undefined> = process.env,
   bootstrapEnvPath = BOOTSTRAP_ENV_PATH,
 ): GreenfieldConfig {
-  const merged: Record<string, string | undefined> = { ...readEnvFile(bootstrapEnvPath), ...env };
-  const baseUrl = merged.BTCPAY_URL;
-  const apiKey = merged.BTCPAY_API_KEY;
-  const storeId = merged.BTCPAY_STORE_ID;
+  const file = readEnvFile(bootstrapEnvPath);
+  // 空文字の環境変数は「設定なし」として扱い、ファイルの値を使う
+  const value = (key: string) => env[key]?.trim() || file[key];
+  const baseUrl = value("BTCPAY_URL");
+  const apiKey = value("BTCPAY_API_KEY");
+  const storeId = value("BTCPAY_STORE_ID");
   if (!baseUrl || !apiKey || !storeId) {
     throw new Error("BTCPay の設定がない。infra/regtest/bootstrap.sh を実行する（infra/regtest/README.md）");
   }
@@ -31,8 +33,8 @@ function readEnvFile(path: string): Record<string, string> {
   }
   return Object.fromEntries(
     text
-      .split("\n")
-      .map((line) => line.match(/^([A-Z_]+)=(.*)$/))
+      .split(/\r?\n/)
+      .map((line) => line.trim().match(/^([A-Z_]+)=(.*)$/))
       .filter((match): match is RegExpMatchArray => match !== null)
       .map((match) => [match[1], match[2]]),
   );
