@@ -14,7 +14,7 @@ export default function Index() {
     <s-page heading="Bitcoin 決済">
       <s-section>
         <s-paragraph>
-          手動決済方法「Bitcoin で支払う」の注文に、BTCPay Server の invoice を作ります。
+          手動決済方法「Bitcoinで支払う」の注文に、BTCPay Server の invoice を作ります。
           支払いの状況は、注文のタグ（btc-review-*）と Thank you ページで確認できます。
         </s-paragraph>
       </s-section>

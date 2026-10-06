@@ -21,6 +21,11 @@ api_version = "2026-07"
   uri = "/webhooks/app/scopes_update"
   topics = [ "app/scopes_update" ]
 
+  # invoice の作成の起点（design.md 5.1）。注文のデータは保護された顧客データなので、Level 1 の申請が要る（ADR 4）
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/orders/create"
+  topics = [ "orders/create" ]
+
 [auth]
 redirect_urls = [ "https://example.com/api/auth" ]
 

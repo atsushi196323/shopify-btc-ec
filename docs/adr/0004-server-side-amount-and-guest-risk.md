@@ -11,7 +11,7 @@ Thank you ページの拡張から、アプリの API（`POST /invoice {shopifyO
 ## 決定
 1. 拡張の `sessionToken`（アプリのシークレットで署名された JWT）を検証し、ショップを特定する。
 2. `shopifyOrderId` はクライアントの値を信用せず、Admin API で注文を取得して次を確認する。
-   - 手動決済方法「Bitcoin で支払う」の注文であること
+   - 手動決済方法「Bitcoinで支払う」の注文であること
    - 支払い待ちの注文であること
 3. **不変条件: 請求額は必ずサーバー側で Admin API から取得した値を使う。**
 4. 返す情報は最小限にする（checkout link と表示用の状態だけ）。
@@ -35,7 +35,7 @@ Thank you ページの拡張から、アプリの API（`POST /invoice {shopifyO
 - 判断は `src/application/order-eligibility.ts` の `checkOrderEligibility` にまとめ、invoice を作る経路（`orders/create`・拡張・孤児回復の作り直し）はすべてここを通す。
   invoice を作れない注文には Payment も作らない（結果は `NOT_ELIGIBLE` と理由）。
 - 確認する条件と順番:
-  1. `paymentGatewayNames` に「Bitcoin で支払う」を含む（ギフトカードとの併用もありうるので、一致ではなく包含で見る）
+  1. `paymentGatewayNames` に「Bitcoinで支払う」を含む（ギフトカードとの併用もありうるので、一致ではなく包含で見る）
   2. キャンセルされていない
   3. `displayFinancialStatus` が `PENDING` か `PARTIALLY_PAID`（一部が別の方法で支払われた注文は残高だけを請求する）
   4. 客に見せた通貨（`presentmentCurrencyCode`）と残高の通貨が、どちらも JPY。
@@ -43,4 +43,6 @@ Thank you ページの拡張から、アプリの API（`POST /invoice {shopifyO
   5. 残高が0より大きい
 - 孤児回復で作り直す前にも確かめ直す。予約から時間が経つ間に、キャンセルや別の方法での支払いがありうるため。
   確かめ直して作れなかった試行は CREATING のまま残す（既知の制限に記載）。
-- 支払い方法の名前「Bitcoin で支払う」はコードの定数で持つ。本物の API が返す値は `orders/create` をつなぐときに確かめる。
+- 支払い方法の名前「Bitcoinで支払う」はコードの定数で持つ。
+  `orders/create` をつないだときに、テスト注文（#1006）で `paymentGatewayNames` が `["Bitcoinで支払う"]`（「Bitcoin」と「で」の間に空白なし）を返すことを確かめた。
+  当初はコードと文書に空白ありで書いており、その注文は `NOT_BITCOIN_ORDER` になった。名前は完全一致で比べるので、管理画面の名前と1文字でも違えば invoice は作られない（既知の制限に記載）。

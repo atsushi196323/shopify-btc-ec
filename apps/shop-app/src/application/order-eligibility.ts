@@ -3,7 +3,7 @@
 import type { ShopifyOrder } from "./ports/shopify-gateway";
 
 // 管理画面で作った手動決済方法の名前（ADR 1）
-export const BITCOIN_GATEWAY_NAME = "Bitcoin で支払う";
+export const BITCOIN_GATEWAY_NAME = "Bitcoinで支払う";
 // BTCPay のレートは BTC_JPY だけなので、JPY 以外の注文には invoice を作れない（ADR 4）
 export const INVOICE_CURRENCY = "JPY";
 // PARTIALLY_PAID も受け付ける。一部が別の方法で支払われた注文には、残高だけを請求する（ADR 4）

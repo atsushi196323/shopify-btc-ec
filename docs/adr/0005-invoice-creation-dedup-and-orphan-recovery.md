@@ -55,3 +55,13 @@ BTCPay にだけ invoice が残る（孤児）。
   紐づくのは先に紐づけた方だけで、もう1つは試行に結びつかないまま BTCPay に残る。購入者に見せるのは紐づいた方の checkout link だけなので、払われることはない。
   スイープが「一定時間」を BTCPay の呼び出しの上限（既定 10 秒）より十分長く取れば起きない。この値は W4 のスイープで決める。
 - テスト: `tests/application/create-invoice.test.ts`（DB は本物の SQLite、BTCPay と Shopify はフェイク）。本物の BTCPay でのシナリオ7 は W2 の後半で行う。
+
+## W2 で決めたこと（2026-10-06、orders/create のルート）
+- ルートは `app/routes/webhooks.orders.create.tsx`。HMAC の検証（テンプレート）→ ペイロードから注文の GID だけを取り出す → `createInvoiceForOrder` を呼ぶ。
+  ペイロードのほかの値は使わない（ADR 4）。依存の組み立ては `app/invoice.server.ts` に置く。
+- **例外は 500 のまま返し、Shopify の再送に任せる**。予約の前（注文の取得など）で落ちた場合は、再送で作り直せる。
+  予約の後で落ちた場合は、再送は UNIQUE に負けて既存の行を返し、CREATING の試行はスイープが回復する。
+- `NOT_ELIGIBLE`・`ORDER_NOT_FOUND`（Bitcoin 以外の支払い方法の注文など）は 200 を返す。再送しても結果は変わらないため。
+- アンインストール後に届いてセッションがない Webhook は、何もせず 200 を返す。
+- BTCPay の接続設定は、統合テストと同じく環境変数を優先し、なければ `infra/regtest/.bootstrap.env` を読む（`src/adapters/btcpay/config.ts`）。
+  設定は最初の invoice の作成のときに読むので、設定がなくても管理画面などほかのルートは動く。

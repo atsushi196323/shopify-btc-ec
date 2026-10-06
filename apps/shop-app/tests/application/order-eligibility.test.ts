@@ -6,7 +6,7 @@ import type { ShopifyOrder } from "../../src/application/ports/shopify-gateway";
 describe("checkOrderEligibility", () => {
   const order = (overrides: Partial<ShopifyOrder> = {}): ShopifyOrder => ({
     shopifyOrderId: "gid://shopify/Order/1",
-    paymentGatewayNames: ["Bitcoin で支払う"],
+    paymentGatewayNames: ["Bitcoinで支払う"],
     financialStatus: "PENDING",
     cancelled: false,
     presentmentCurrencyCode: "JPY",
@@ -14,13 +14,13 @@ describe("checkOrderEligibility", () => {
     ...overrides,
   });
 
-  it("Bitcoin で支払う、支払い待ちの JPY の注文には invoice を作れる", () => {
+  it("Bitcoinで支払う、支払い待ちの JPY の注文には invoice を作れる", () => {
     expect(checkOrderEligibility(order())).toEqual({ eligible: true });
   });
 
   it("一部が別の方法で支払われた注文（PARTIALLY_PAID）にも、残高があれば作れる", () => {
     const partiallyPaid = order({
-      paymentGatewayNames: ["gift_card", "Bitcoin で支払う"],
+      paymentGatewayNames: ["gift_card", "Bitcoinで支払う"],
       financialStatus: "PARTIALLY_PAID",
       outstanding: { amount: "400.0", currencyCode: "JPY" },
     });
