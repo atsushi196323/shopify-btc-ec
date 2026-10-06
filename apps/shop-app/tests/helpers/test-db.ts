@@ -24,7 +24,8 @@ export function createTestDb(): { prisma: PrismaClient; cleanup: () => Promise<v
     });
   }
 
-  const prisma = new PrismaClient({ datasourceUrl: url });
+  // 本番（schema.prisma）と同じく接続を1本にする
+  const prisma = new PrismaClient({ datasourceUrl: `${url}?connection_limit=1` });
   return {
     prisma,
     cleanup: async () => {

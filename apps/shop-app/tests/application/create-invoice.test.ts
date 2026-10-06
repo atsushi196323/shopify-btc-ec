@@ -1,0 +1,203 @@
+import { randomUUID } from "node:crypto";
+import type { PrismaClient } from "@prisma/client";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { PrismaPaymentRepository } from "../../src/adapters/db/prisma-payment-repository";
+import { FakeShopifyGateway } from "../../src/adapters/shopify-fake/fake-shopify-gateway";
+import { createInvoiceForOrder, recoverCreatingAttempt, type InvoiceDeps } from "../../src/application/create-invoice";
+import { FakeBtcpayGateway } from "../helpers/fake-btcpay";
+import { createTestDb } from "../helpers/test-db";
+
+// invoice の作成（design.md 5.1）と CREATING の試行の回復（5.5 の 1）。DB は本物の SQLite、BTCPay と Shopify はフェイク。
+// 本物の BTCPay に対する競合（シナリオ7）とクラッシュ回復（シナリオ8）は統合テストで確かめる
+describe("invoice の作成", () => {
+  let prisma: PrismaClient;
+  let cleanup: () => Promise<void>;
+  let btcpay: FakeBtcpayGateway;
+  let shopify: FakeShopifyGateway;
+  let deps: InvoiceDeps;
+
+  beforeAll(() => {
+    ({ prisma, cleanup } = createTestDb());
+  });
+
+  afterAll(async () => {
+    await cleanup();
+  });
+
+  beforeEach(() => {
+    btcpay = new FakeBtcpayGateway();
+    shopify = new FakeShopifyGateway();
+    deps = { payments: new PrismaPaymentRepository(prisma), btcpay, shopify };
+  });
+
+  function addOrder(outstanding = "1000.0"): string {
+    const shopifyOrderId = `gid://shopify/Order/${randomUUID()}`;
+    shopify.addOrder({
+      shopifyOrderId,
+      paymentGatewayNames: ["Bitcoin で支払う"],
+      financialStatus: "PENDING",
+      cancelled: false,
+      outstanding: { amount: outstanding, currencyCode: "JPY" },
+    });
+    return shopifyOrderId;
+  }
+
+  describe("createInvoiceForOrder", () => {
+    it("Shopify の残高で invoice を作り、orderId 欄には attemptId を入れる", async () => {
+      const shopifyOrderId = addOrder("2500.0");
+
+      const result = await createInvoiceForOrder(deps, shopifyOrderId);
+
+      if (result.outcome !== "CREATED") throw new Error(`CREATED ではない: ${result.outcome}`);
+      expect(result.payment).toMatchObject({ shopifyOrderId, status: "AWAITING_PAYMENT" });
+      expect(result.payment.currentAttempt).toEqual({
+        id: result.invoice.attemptId,
+        status: "NEW",
+        btcpayInvoiceId: result.invoice.invoiceId,
+      });
+      expect(btcpay.created).toEqual([
+        {
+          attemptId: result.payment.currentAttempt.id,
+          shopifyOrderId,
+          amount: "2500.0",
+          currency: "JPY",
+          invoiceId: result.invoice.invoiceId,
+        },
+      ]);
+    });
+
+    it("2回目は BTCPay を呼ばず、既存の Payment を返す", async () => {
+      const shopifyOrderId = addOrder();
+      const first = await createInvoiceForOrder(deps, shopifyOrderId);
+
+      const second = await createInvoiceForOrder(deps, shopifyOrderId);
+
+      expect(second).toEqual({ outcome: "EXISTING", payment: first.outcome === "CREATED" && first.payment });
+      expect(btcpay.created).toHaveLength(1);
+    });
+
+    it("注文がなければ、何も作らない", async () => {
+      const shopifyOrderId = `gid://shopify/Order/${randomUUID()}`;
+
+      expect(await createInvoiceForOrder(deps, shopifyOrderId)).toEqual({ outcome: "ORDER_NOT_FOUND" });
+      expect(await prisma.payment.findUnique({ where: { shopifyOrderId } })).toBeNull();
+      expect(btcpay.created).toHaveLength(0);
+    });
+
+    it("同じ注文に10並列で作成しても、Payment と invoice はどちらも1件", async () => {
+      const shopifyOrderId = addOrder();
+      // BTCPay の呼び出しを遅らせ、全員が予約までたどり着く状況を作る
+      btcpay.beforeCreate = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+      const results = await Promise.all(Array.from({ length: 10 }, () => createInvoiceForOrder(deps, shopifyOrderId)));
+
+      expect(results.filter((result) => result.outcome === "CREATED")).toHaveLength(1);
+      expect(await prisma.payment.count({ where: { shopifyOrderId } })).toBe(1);
+      expect(btcpay.created).toHaveLength(1);
+    });
+
+    it("BTCPay の呼び出しが失敗したら例外を返し、試行は CREATING のまま残る", async () => {
+      const shopifyOrderId = addOrder();
+      btcpay.beforeCreate = () => {
+        throw new Error("BTCPay に届かない");
+      };
+
+      await expect(createInvoiceForOrder(deps, shopifyOrderId)).rejects.toThrow("BTCPay に届かない");
+
+      const existing = await createInvoiceForOrder(deps, shopifyOrderId);
+      expect(existing).toMatchObject({
+        outcome: "EXISTING",
+        payment: { status: "CREATING", currentAttempt: { status: "CREATING", btcpayInvoiceId: null } },
+      });
+    });
+  });
+
+  describe("recoverCreatingAttempt", () => {
+    // BTCPay の呼び出しが失敗した状態（CREATING の孤児）を作る
+    async function orphan(): Promise<{ shopifyOrderId: string; attemptId: string }> {
+      const shopifyOrderId = addOrder();
+      const original = btcpay.beforeCreate;
+      btcpay.beforeCreate = () => {
+        throw new Error("BTCPay に届かない");
+      };
+      await expect(createInvoiceForOrder(deps, shopifyOrderId)).rejects.toThrow();
+      btcpay.beforeCreate = original;
+      const payment = await deps.payments.findByShopifyOrderId(shopifyOrderId);
+      if (!payment) throw new Error("Payment がない");
+      return { shopifyOrderId, attemptId: payment.currentAttempt.id };
+    }
+
+    it("BTCPay に invoice がなければ作り直して紐づける", async () => {
+      const { shopifyOrderId, attemptId } = await orphan();
+
+      const result = await recoverCreatingAttempt(deps, attemptId);
+
+      expect(result).toMatchObject({
+        outcome: "RECREATED",
+        payment: { shopifyOrderId, status: "AWAITING_PAYMENT", currentAttempt: { id: attemptId, status: "NEW" } },
+      });
+      expect(btcpay.created.map((invoice) => invoice.attemptId)).toEqual([attemptId]);
+    });
+
+    it("BTCPay で作った後に紐づけ前で落ちた invoice は、作り直さずに紐づける", async () => {
+      const shopifyOrderId = addOrder();
+      // 紐づけの前に落ちたことにする: BTCPay には invoice があるが、DB は CREATING のまま
+      const reservation = await deps.payments.reserve({ paymentId: randomUUID(), attemptId: randomUUID(), shopifyOrderId });
+      const attemptId = reservation.payment.currentAttempt.id;
+      const invoice = await btcpay.createInvoice({ attemptId, shopifyOrderId, amount: "1000.0", currency: "JPY" });
+
+      const result = await recoverCreatingAttempt(deps, attemptId);
+
+      expect(result).toMatchObject({
+        outcome: "RECOVERED",
+        payment: { status: "AWAITING_PAYMENT", currentAttempt: { btcpayInvoiceId: invoice.invoiceId } },
+      });
+      expect(btcpay.created).toHaveLength(1);
+    });
+
+    it("見つかった invoice がすでに入金済みなら、その状態から始める", async () => {
+      const { attemptId } = await orphan();
+      const invoice = await btcpay.createInvoice({ attemptId, shopifyOrderId: "x", amount: "1000.0", currency: "JPY" });
+      btcpay.setObservation(invoice.invoiceId, { status: "PROCESSING", received: "FULL" });
+
+      const result = await recoverCreatingAttempt(deps, attemptId);
+
+      expect(result).toMatchObject({
+        outcome: "RECOVERED",
+        payment: { status: "CONFIRMING", currentAttempt: { status: "PROCESSING" } },
+      });
+    });
+
+    it("すでに紐づいた試行には何もしない", async () => {
+      const shopifyOrderId = addOrder();
+      const created = await createInvoiceForOrder(deps, shopifyOrderId);
+      if (created.outcome !== "CREATED") throw new Error("CREATED ではない");
+
+      expect(await recoverCreatingAttempt(deps, created.payment.currentAttempt.id)).toEqual({
+        outcome: "ALREADY_ATTACHED",
+      });
+      expect(btcpay.created).toHaveLength(1);
+    });
+
+    it("作成中の呼び出しが後から紐づけに来ても、回復した側の invoice を正とする", async () => {
+      const shopifyOrderId = addOrder();
+      let release!: () => void;
+      const blocked = new Promise<void>((resolve) => (release = resolve));
+      btcpay.beforeCreate = () => blocked;
+      const slow = createInvoiceForOrder(deps, shopifyOrderId);
+      // 遅い呼び出しが予約を終え、BTCPay の呼び出しで止まるのを待つ
+      await expect.poll(() => deps.payments.findByShopifyOrderId(shopifyOrderId)).not.toBeNull();
+      const payment = await deps.payments.findByShopifyOrderId(shopifyOrderId);
+      btcpay.beforeCreate = () => {};
+
+      const recovered = await recoverCreatingAttempt(deps, payment!.currentAttempt.id);
+      release();
+      const late = await slow;
+
+      expect(recovered.outcome).toBe("RECREATED");
+      expect(late).toEqual({ outcome: "EXISTING", payment: recovered.outcome === "RECREATED" && recovered.payment });
+      // 遅い呼び出しが作った invoice は BTCPay に残るが、試行には紐づかない（ADR 5）
+      expect(btcpay.created).toHaveLength(2);
+    });
+  });
+});
