@@ -23,6 +23,18 @@ describe("loadGreenfieldConfig", () => {
     expect(loadGreenfieldConfig({ BTCPAY_API_KEY: "from-env" }, path)).toMatchObject({ apiKey: "from-env" });
   });
 
+  it("空文字の環境変数は無視し、.bootstrap.env の値を使う", () => {
+    const path = bootstrapEnv("BTCPAY_URL=http://localhost:49392\nBTCPAY_API_KEY=key\nBTCPAY_STORE_ID=store\n");
+
+    expect(loadGreenfieldConfig({ BTCPAY_API_KEY: "" }, path)).toMatchObject({ apiKey: "key" });
+  });
+
+  it("CRLF の改行でも値に \\r を含めない", () => {
+    const path = bootstrapEnv("BTCPAY_URL=http://localhost:49392\r\nBTCPAY_API_KEY=key\r\nBTCPAY_STORE_ID=store\r\n");
+
+    expect(loadGreenfieldConfig({}, path)).toEqual({ baseUrl: "http://localhost:49392", apiKey: "key", storeId: "store" });
+  });
+
   it("値が揃わなければ例外にする", () => {
     expect(() => loadGreenfieldConfig({ BTCPAY_URL: "http://localhost:49392" }, "/nonexistent/.bootstrap.env")).toThrow(
       "BTCPay の設定がない",

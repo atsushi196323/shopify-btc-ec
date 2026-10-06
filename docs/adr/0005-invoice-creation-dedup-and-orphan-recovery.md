@@ -64,4 +64,7 @@ BTCPay にだけ invoice が残る（孤児）。
 - `NOT_ELIGIBLE`・`ORDER_NOT_FOUND`（Bitcoin 以外の支払い方法の注文など）は 200 を返す。再送しても結果は変わらないため。
 - アンインストール後に届いてセッションがない Webhook は、何もせず 200 を返す。
 - BTCPay の接続設定は、統合テストと同じく環境変数を優先し、なければ `infra/regtest/.bootstrap.env` を読む（`src/adapters/btcpay/config.ts`）。
-  設定は最初の invoice の作成のときに読むので、設定がなくても管理画面などほかのルートは動く。
+  設定は invoice を作るたびに読む。設定がなくても管理画面などほかのルートは動き、`down -v` と bootstrap.sh で API キーやストアが変わっても再起動せずに追いつける。
+  空文字の環境変数は設定なしとして扱い、ファイルの値を使う。
+- Shopify は Webhook の応答を約5秒しか待たないが、BTCPay の呼び出しの上限は 10 秒にしている。超えた場合は 5.1 の想定どおり、再送は既存の行を返し、
+  BTCPay で作られた invoice はスイープの孤児回復が `orderId` で見つけて紐づける。スイープ（W4）ができるまでは、その試行は CREATING のまま残る（拡張は作成中として待つ）。

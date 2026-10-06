@@ -28,9 +28,17 @@ describe("checkOrderEligibility", () => {
     expect(checkOrderEligibility(partiallyPaid)).toEqual({ eligible: true });
   });
 
+  it.each(["Bitcoin で支払う", " Bitcoinで支払う ", "Ｂｉｔｃｏｉｎ　で支払う"])(
+    "支払い方法の名前は空白と全角・半角の違いを無視して比べる（%s）",
+    (name) => {
+      expect(checkOrderEligibility(order({ paymentGatewayNames: [name] }))).toEqual({ eligible: true });
+    },
+  );
+
   it.each<[string, Partial<ShopifyOrder>, IneligibleReason]>([
     ["Bitcoin 以外の支払い方法", { paymentGatewayNames: ["shopify_payments"] }, "NOT_BITCOIN_ORDER"],
     ["支払い方法がない", { paymentGatewayNames: [] }, "NOT_BITCOIN_ORDER"],
+    ["名前の一部だけが一致する", { paymentGatewayNames: ["Bitcoinで支払う（停止中）"] }, "NOT_BITCOIN_ORDER"],
     ["キャンセル済み", { cancelled: true }, "CANCELLED"],
     ["支払い済み", { financialStatus: "PAID" }, "NOT_AWAITING_PAYMENT"],
     ["返金済み", { financialStatus: "REFUNDED" }, "NOT_AWAITING_PAYMENT"],
