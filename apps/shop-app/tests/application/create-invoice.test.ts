@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PrismaPaymentRepository } from "../../src/adapters/db/prisma-payment-repository";
+import type { ShopifyOrder } from "../../src/application/ports/shopify-gateway";
 import { FakeShopifyGateway } from "../../src/adapters/shopify-fake/fake-shopify-gateway";
 import { createInvoiceForOrder, recoverCreatingAttempt, type InvoiceDeps } from "../../src/application/create-invoice";
 import { FakeBtcpayGateway } from "../helpers/fake-btcpay";
@@ -30,21 +31,29 @@ describe("invoice の作成", () => {
     deps = { payments: new PrismaPaymentRepository(prisma), btcpay, shopify };
   });
 
-  function addOrder(outstanding = "1000.0"): string {
+  function addOrder(overrides: Partial<Omit<ShopifyOrder, "shopifyOrderId">> = {}): string {
     const shopifyOrderId = `gid://shopify/Order/${randomUUID()}`;
     shopify.addOrder({
       shopifyOrderId,
       paymentGatewayNames: ["Bitcoin で支払う"],
       financialStatus: "PENDING",
       cancelled: false,
-      outstanding: { amount: outstanding, currencyCode: "JPY" },
+      presentmentCurrencyCode: "JPY",
+      outstanding: { amount: "1000.0", currencyCode: "JPY" },
+      ...overrides,
     });
     return shopifyOrderId;
   }
 
+  async function cancelOrder(shopifyOrderId: string): Promise<void> {
+    const order = await shopify.getOrder(shopifyOrderId);
+    if (!order) throw new Error("注文がない");
+    shopify.addOrder({ ...order, cancelled: true });
+  }
+
   describe("createInvoiceForOrder", () => {
     it("Shopify の残高で invoice を作り、orderId 欄には attemptId を入れる", async () => {
-      const shopifyOrderId = addOrder("2500.0");
+      const shopifyOrderId = addOrder({ outstanding: { amount: "2500.0", currencyCode: "JPY" } });
 
       const result = await createInvoiceForOrder(deps, shopifyOrderId);
 
@@ -80,6 +89,14 @@ describe("invoice の作成", () => {
       const shopifyOrderId = `gid://shopify/Order/${randomUUID()}`;
 
       expect(await createInvoiceForOrder(deps, shopifyOrderId)).toEqual({ outcome: "ORDER_NOT_FOUND" });
+      expect(await prisma.payment.findUnique({ where: { shopifyOrderId } })).toBeNull();
+      expect(btcpay.created).toHaveLength(0);
+    });
+
+    it("invoice を作れない注文には、Payment も invoice も作らない", async () => {
+      const shopifyOrderId = addOrder({ cancelled: true });
+
+      expect(await createInvoiceForOrder(deps, shopifyOrderId)).toEqual({ outcome: "NOT_ELIGIBLE", reason: "CANCELLED" });
       expect(await prisma.payment.findUnique({ where: { shopifyOrderId } })).toBeNull();
       expect(btcpay.created).toHaveLength(0);
     });
@@ -137,6 +154,15 @@ describe("invoice の作成", () => {
         payment: { shopifyOrderId, status: "AWAITING_PAYMENT", currentAttempt: { id: attemptId, status: "NEW" } },
       });
       expect(btcpay.created.map((invoice) => invoice.attemptId)).toEqual([attemptId]);
+    });
+
+    it("作り直す前に注文がキャンセルされていたら、作り直さずに CREATING のまま残す", async () => {
+      const { shopifyOrderId, attemptId } = await orphan();
+      await cancelOrder(shopifyOrderId);
+
+      expect(await recoverCreatingAttempt(deps, attemptId)).toEqual({ outcome: "NOT_ELIGIBLE", reason: "CANCELLED" });
+      expect(btcpay.created).toHaveLength(0);
+      expect(await deps.payments.findAttempt(attemptId)).toMatchObject({ status: "CREATING", btcpayInvoiceId: null });
     });
 
     it("BTCPay で作った後に紐づけ前で落ちた invoice は、作り直さずに紐づける", async () => {

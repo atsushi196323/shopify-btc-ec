@@ -14,6 +14,7 @@ export const ORDER_FOR_INVOICE = `#graphql
       paymentGatewayNames
       displayFinancialStatus
       cancelledAt
+      presentmentCurrencyCode
       totalOutstandingSet {
         shopMoney {
           amount
@@ -31,6 +32,7 @@ export type OrderForInvoiceQuery = {
     paymentGatewayNames: string[];
     displayFinancialStatus: string | null;
     cancelledAt: string | null;
+    presentmentCurrencyCode: string;
     totalOutstandingSet: { shopMoney: { amount: string; currencyCode: string } };
   } | null;
 };
@@ -53,6 +55,7 @@ export class AdminShopifyGateway implements ShopifyGateway {
       paymentGatewayNames: order.paymentGatewayNames,
       financialStatus: order.displayFinancialStatus ?? "UNKNOWN",
       cancelled: order.cancelledAt != null,
+      presentmentCurrencyCode: order.presentmentCurrencyCode,
       outstanding: {
         amount: order.totalOutstandingSet.shopMoney.amount,
         currencyCode: order.totalOutstandingSet.shopMoney.currencyCode,

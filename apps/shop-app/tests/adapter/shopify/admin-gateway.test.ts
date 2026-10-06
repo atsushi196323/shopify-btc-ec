@@ -56,6 +56,7 @@ describe("ORDER_FOR_INVOICE とスキーマ（2026-07）", () => {
       "order.paymentGatewayNames": false,
       "order.displayFinancialStatus": true,
       "order.cancelledAt": true,
+      "order.presentmentCurrencyCode": false,
       "order.totalOutstandingSet": false,
       "order.totalOutstandingSet.shopMoney": false,
       "order.totalOutstandingSet.shopMoney.amount": false,
@@ -83,6 +84,7 @@ describe("AdminShopifyGateway.getOrder", () => {
         paymentGatewayNames: ["Bitcoin で支払う"],
         displayFinancialStatus: "PENDING",
         cancelledAt: null,
+        presentmentCurrencyCode: "JPY",
         totalOutstandingSet: { shopMoney: { amount: "1000.0", currencyCode: "JPY" } },
       },
     };
@@ -93,6 +95,7 @@ describe("AdminShopifyGateway.getOrder", () => {
       paymentGatewayNames: ["Bitcoin で支払う"],
       financialStatus: "PENDING",
       cancelled: false,
+      presentmentCurrencyCode: "JPY",
       outstanding: { amount: "1000.0", currencyCode: "JPY" },
     });
     expect(calls).toEqual([{ query: ORDER_FOR_INVOICE, variables: { id: orderId } }]);
@@ -106,6 +109,7 @@ describe("AdminShopifyGateway.getOrder", () => {
           paymentGatewayNames: [],
           displayFinancialStatus: null,
           cancelledAt: "2026-10-05T00:00:00Z",
+          presentmentCurrencyCode: "JPY",
           totalOutstandingSet: { shopMoney: { amount: "0.0", currencyCode: "JPY" } },
         },
       },
