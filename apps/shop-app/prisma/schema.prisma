@@ -8,9 +8,11 @@ generator client {
 // Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
 // enough when changing adapters.
 // See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+// connection_limit=1: 書き込みのトランザクションを Prisma の中で順番に流す。接続が複数あると、ロック待ちの接続が
+// ロックを持つ側の次のクエリまで止め、busy_timeout（5秒）で失敗する（ADR 7）
 datasource db {
   provider = "sqlite"
-  url      = "file:dev.sqlite"
+  url      = "file:dev.sqlite?connection_limit=1"
 }
 
 model Session {

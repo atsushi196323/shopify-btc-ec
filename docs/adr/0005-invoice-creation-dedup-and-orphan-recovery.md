@@ -44,3 +44,14 @@ BTCPay にだけ invoice が残る（孤児）。
 - ストアにない invoice の取得は、404 ではなく 403 が返る（権限の検査で弾かれる）。「見つからない」と「権限がない」を区別できないので、
   孤児の回復では取得ではなく検索（0件なら作成を再試行）を使う。
 - 本物の BTCPay に対するアダプタのテストは `tests/integration/btcpay/` に置き、`pnpm test:integration` で流す（`pnpm test` には含めない）。
+
+## W2 で決めたこと（2026-10-06、invoice の作成）
+- ユースケースは `src/application/create-invoice.ts`。初回の作成（`createInvoiceForOrder`）と、CREATING の試行の回復（`recoverCreatingAttempt`）の2つ。
+  回復はスイープ（W4）から試行ごとに呼ぶ。初回の作成と再発行の試行を区別しない。
+- **紐づけは「CREATING かつ `btcpayInvoiceId` が NULL」の試行に対する条件付き更新**で行う。先に紐づけた側が勝ち、負けた側は勝った側の invoice を返す。
+- 紐づけた invoice の状態は NEW とは限らない（回復では、入金済み・期限切れのこともある）。そのため、紐づけの遷移とフラグもドメインの `applyObservation` で決める。
+- BTCPay の呼び出しや紐づけで例外が出たら、そのまま例外を返す。試行は CREATING のまま残り、回復に任せる。
+- **同じ試行に invoice が2つできる場合が1つだけ残る**: 作成中の呼び出しが BTCPay の応答を待っている間に、スイープが回復して invoice を作り直した場合。
+  紐づくのは先に紐づけた方だけで、もう1つは試行に結びつかないまま BTCPay に残る。購入者に見せるのは紐づいた方の checkout link だけなので、払われることはない。
+  スイープが「一定時間」を BTCPay の呼び出しの上限（既定 10 秒）より十分長く取れば起きない。この値は W4 のスイープで決める。
+- テスト: `tests/application/create-invoice.test.ts`（DB は本物の SQLite、BTCPay と Shopify はフェイク）。本物の BTCPay でのシナリオ7 は W2 の後半で行う。
