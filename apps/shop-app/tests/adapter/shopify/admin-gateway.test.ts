@@ -81,7 +81,7 @@ describe("AdminShopifyGateway.getOrder", () => {
     const data: OrderForInvoiceQuery = {
       order: {
         id: orderId,
-        paymentGatewayNames: ["Bitcoin で支払う"],
+        paymentGatewayNames: ["Bitcoinで支払う"],
         displayFinancialStatus: "PENDING",
         cancelledAt: null,
         presentmentCurrencyCode: "JPY",
@@ -92,7 +92,7 @@ describe("AdminShopifyGateway.getOrder", () => {
 
     expect(await gateway.getOrder(orderId)).toEqual({
       shopifyOrderId: orderId,
-      paymentGatewayNames: ["Bitcoin で支払う"],
+      paymentGatewayNames: ["Bitcoinで支払う"],
       financialStatus: "PENDING",
       cancelled: false,
       presentmentCurrencyCode: "JPY",

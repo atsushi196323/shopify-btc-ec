@@ -35,7 +35,7 @@ describe("invoice の作成", () => {
     const shopifyOrderId = `gid://shopify/Order/${randomUUID()}`;
     shopify.addOrder({
       shopifyOrderId,
-      paymentGatewayNames: ["Bitcoin で支払う"],
+      paymentGatewayNames: ["Bitcoinで支払う"],
       financialStatus: "PENDING",
       cancelled: false,
       presentmentCurrencyCode: "JPY",

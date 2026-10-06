@@ -10,13 +10,13 @@ Shopify のチェックアウトに独自の決済方法を出すには Payments
 
 ## 決定
 **手動決済方法と、Thank you / 注文状況ページの Checkout UI Extension を組み合わせる。**
-- 管理画面で手動決済方法「Bitcoin で支払う」を作る。注文は支払い待ちのまま確定する。
+- 管理画面で手動決済方法「Bitcoinで支払う」を作る。注文は支払い待ちのまま確定する。
 - `orders/create` Webhook で BTCPay の invoice を作る。拡張から問い合わせた時点で未作成なら、冪等に作る（[ADR 5](0005-invoice-creation-dedup-and-orphan-recovery.md)）。
 - 拡張で支払いリンクと状態を表示する。
 - Settled になったら Admin GraphQL の `orderMarkAsPaid` で支払い済みにする。
 
 ## W1 で確認したこと（2026-10-02）
-- 開発ストア `bitcoin-ec`（Basic プラン、JPY）に手動決済方法「Bitcoin で支払う」を作り、テスト注文が「支払い待ち」で確定することを確認した。
+- 開発ストア `bitcoin-ec`（Basic プラン、JPY）に手動決済方法「Bitcoinで支払う」を作り、テスト注文が「支払い待ち」で確定することを確認した。
 - Thank you / 注文状況ページの拡張は Basic プランでも使える。
 
 ## 未検証事項（W2 の最初に30分で区切って確認する）

@@ -40,7 +40,7 @@
                                                     [SQLite]               [NBXplorer]─[bitcoind regtest]
 ```
 
-- **Shopify への組み込み**: 手動決済方法「Bitcoin で支払う」。注文は支払い待ちのまま確定し、
+- **Shopify への組み込み**: 手動決済方法「Bitcoinで支払う」。注文は支払い待ちのまま確定し、
   Thank you / 注文状況ページの Checkout UI Extension で支払いへ誘導する（[ADR 1](adr/0001-checkout-integration.md)）。
 - **支払い方法**: オンチェーンのみ。Lightning は stretch（[ADR 2](adr/0002-onchain-first.md)）。
 - **アプリの構成**: Shopify CLI テンプレート（React Router）1つ。中身は
@@ -367,7 +367,7 @@ Shopify の Webhook（`orders/create`）は、MVP では inbox を通さない�
 - 孤児回復で作り直す前に注文を確かめ直し、キャンセル済み・支払い済みなどで invoice を作れなかった試行は、CREATING のまま残る。
   スイープは回るたびにその試行を確かめ直し、拡張は「作成中」として待ち続ける（終わりの状態は設けていない。ADR 4）。
 - invoice を作った後に Shopify で注文がキャンセルされても、invoice は有効なまま残り、拡張も返し続ける。注文の自動キャンセルとあわせて stretch で扱う。
-- 手動決済方法の名前「Bitcoin で支払う」をコードで持っている。管理画面で名前を変えると、どの注文にも invoice が作られなくなる。
+- 手動決済方法の名前「Bitcoinで支払う」をコードで持っている。管理画面で名前を変えると、どの注文にも invoice が作られなくなる。
 
 ## ADR 一覧
 
