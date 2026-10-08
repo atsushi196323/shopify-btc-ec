@@ -48,3 +48,20 @@ Thank you ページの拡張から、アプリの API（`POST /invoice {shopifyO
   当初はコードと文書に空白ありで書いており、その注文は `NOT_BITCOIN_ORDER` になった。
 - 同じ食い違いを繰り返さないよう、**名前は空白と全角・半角の違いを無視して比べる**（NFKC で正規化し、空白を除いてから完全一致）。
   空白以外の文字が違う名前（名前の変更）は一致しない（既知の制限に記載）。
+
+## W2 で決めたこと（2026-10-08、拡張 API）
+- ルートは `POST /api/extension/invoice`、ボディは `{ shopifyOrderId }`（コンテキストの `POST /invoice` を、ADR 1 で確かめた `/api/extension/` の下に置いた）。
+  処理は `src/application/extension-invoice.ts` の `invoiceForExtension` にまとめ、ルートは認証と組み立てだけにする。
+- セッショントークンの `dest` のショップのオフラインセッションで Admin API を呼び、**Payment を読む前に必ず注文を取り直す**。
+  Payment にはショップの列がないので、ほかのショップの注文 ID を送られても、このショップの Admin API で見えなければ何も返さない。
+  Payment がすでにあれば、注文の支払い状態は問わない（支払い済みになった注文にも「支払い済み」を返す）。
+- 返す表示状態は7つ（`PREPARING`・`AWAITING_PAYMENT`・`CONFIRMING`・`PAID`・`EXPIRED`・`CONTACT_SHOP`・`NOT_APPLICABLE`）。
+  checkout link を返すのは `AWAITING_PAYMENT` のときだけ。invoice を作れない注文は理由を返さず `NOT_APPLICABLE` にまとめる。
+- 注文が Admin API でまだ見えないときは `PREPARING` にする。Thank you ページは注文の作成と同時に表示されるため。
+  Payment が CREATING のときも `PREPARING` で、拡張は時間をおいて問い合わせ直す（design.md 5.1 のとおり、拡張は自分では回復しない）。
+- checkout link は DB に持たず、支払い待ちのときだけ Greenfield で invoice を取って得る（作った直後は作成の結果を使う）。
+  問い合わせのたびに BTCPay を1回呼ぶが、スキーマを変えずに済む。
+- 拡張の `orderConfirmation.order.id` は、型の説明では Order の GID。OrderIdentity の GID で届いても同じ数字の Order の GID にそろえる。
+  実際にどちらで届くかは、拡張の UI を作るときに確かめる。
+- テスト: `tests/application/extension-invoice.test.ts`（DB は本物の SQLite、BTCPay と Shopify はフェイク）、`tests/adapter/shopify/extension-request.test.ts`。
+  ルートとセッショントークンの検証は、拡張の UI をつないだ後の手動の E2E で確かめる。
