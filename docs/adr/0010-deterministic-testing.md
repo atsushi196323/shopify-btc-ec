@@ -37,6 +37,8 @@
 手順は `infra/regtest/README.md` にある。`docker compose down -v` から同じ手順で再現できることを確認した。
 - 固定レートは `BTC_JPY = 10000000`（1円 = 10 sat）。1000円の invoice が 0.0001 BTC になり、外部のレート取得元を使わないことを確認した。
 - ストアの設定: Speed Policy は MediumSpeed（1 conf、ADR 9）、支払い許容誤差 0%、invoice の期限 60秒、期限後の監視 300秒。
+  - **2026-10-08 に invoice の期限を 180秒に変えた**（bootstrap.sh と README）。手動の E2E で、Thank you ページの「Bitcoin で支払う」から
+    BTCPay の支払い画面を開いて支払う確認が、60秒では間に合わなかったため。期限切れを待つ統合テスト（W3 のシナリオ2・3）は、1件あたり約3分かかる。
 - 送金直後は Processing、1ブロック生成で Settled になる。
 - bitcoind のイメージは初回起動時に `default` ウォレットを作って 101 ブロック生成するので、テストの支払いにはこのウォレットを使う。
 - Webhook は `host.docker.internal:3000` に届き、`BTCPay-Sig` は生のボディの HMAC-SHA256（鍵は Webhook 登録時の secret）と一致した。
