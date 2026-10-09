@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { BtcpayInvoice } from "../../../src/application/ports/btcpay-gateway";
 import { BtcpayApiError, GreenfieldClient, type GreenfieldConfig } from "../../../src/adapters/btcpay/greenfield-client";
+import { ForeignInvoiceError } from "../../../src/application/ports/btcpay-gateway";
 import { btcpayConfig, mineBlocks, pay } from "../../helpers/regtest";
 
 // 本物の BTCPay（regtest）に対して、GreenfieldClient が BtcpayGateway の約束どおりに動くことを確かめる。
@@ -74,6 +75,20 @@ describe("GreenfieldClient（regtest）", () => {
 
     expect(error).toBeInstanceOf(BtcpayApiError);
     expect((error as BtcpayApiError).status).toBe(403);
+  });
+
+  it("orderId 欄のない invoice の取得は ForeignInvoiceError になる", async () => {
+    // BTCPay の管理画面で手で作った invoice と同じく、orderId を入れずに作る
+    const response = await fetch(`${config.baseUrl}/api/v1/stores/${config.storeId}/invoices`, {
+      method: "POST",
+      headers: { Authorization: `token ${config.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: "1000", currency: "JPY" }),
+    });
+    const { id } = (await response.json()) as { id: string };
+
+    const error = await client.getInvoice(id).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ForeignInvoiceError);
   });
 
   it("全額を払うと PROCESSING・FULL、1ブロックで SETTLED・FULL になる", async () => {

@@ -74,3 +74,8 @@ ESM と CommonJS で別々に読み込まれている可能性が高いが、原
 - 統合テスト（BTCPay・bitcoind を compose で起動するもの）の CI は、予定どおり W4 で追加する。シナリオが揃っていないので、今作ると作り直しになる。
 - 時間は W4 の GitHub Actions の作業から前借りした扱いにする（全体の時間は増やさない）。
 - lint は CI に入れていない。拡張の生成ファイル（`extensions/thank-you/shopify.d.ts` の `@ts-ignore`）で失敗するため。直すときに CI へ加える。
+
+## 追記（2026-10-09）: Docker Desktop 29 で host.docker.internal が IPv6 を返す
+- Docker Desktop 29.8 では、コンテナの `/etc/hosts` に `host.docker.internal` の IPv6 アドレスも入る。BTCPay（.NET）はそちらを選び、
+  コンテナに IPv6 の経路がないので、Webhook が `Network is unreachable` で届かなかった（IPv4 の 192.168.65.254 には届く）。
+- compose の BTCPay に `DOTNET_SYSTEM_NET_DISABLEIPV6=1` を設定し、IPv4 だけを使わせる。CI（Linux）の `host-gateway` には影響しない。

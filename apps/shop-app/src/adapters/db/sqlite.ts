@@ -1,6 +1,10 @@
 // SQLite の設定（design.md 3章）。WAL・busy_timeout・foreign_keys = ON で使う。
 import type { PrismaClient } from "@prisma/client";
 
+// 接続が1本なので（ADR 7）、トランザクションは開始を待つ列に並ぶ。Prisma の既定（2秒）では、重なったときに待たずに失敗するので、
+// 通常のクエリの接続待ち（pool_timeout の既定 10 秒）に揃える
+export const TRANSACTION_OPTIONS = { maxWait: 10_000 } as const;
+
 type Pragmas = { journalMode: string; busyTimeoutMs: number; foreignKeys: boolean };
 
 // WAL は DB ファイルに保存される設定なので、起動時に1回設定すれば以後の接続にも効く。

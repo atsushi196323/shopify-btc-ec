@@ -105,6 +105,18 @@ describe("PrismaPaymentRepository", () => {
       expect(row.shopifySync).toBe("PENDING");
     });
 
+    it("status もフラグも変わらない紐づけでも version は上げるが、Shopify への反映待ちにはしない", async () => {
+      const { payment } = await reserve();
+      const attemptId = payment.currentAttempt.id;
+
+      // 管理画面で無効化された、入金のない invoice を回復で紐づけた場合。Payment は CREATING のまま
+      const result = await attach(attemptId, { status: "INVALID", received: "NONE" });
+
+      expect(result.payment).toMatchObject({ status: "CREATING", version: 1, currentAttempt: { status: "INVALID" } });
+      const row = await prisma.payment.findUniqueOrThrow({ where: { id: payment.paymentId } });
+      expect(row.shopifySync).toBe("DONE");
+    });
+
     it("2回目の紐づけは何もせず、先に紐づけた invoice を返す", async () => {
       const { payment } = await reserve();
       const first = await attach(payment.currentAttempt.id);
@@ -151,6 +163,92 @@ describe("PrismaPaymentRepository", () => {
 
       await expect(failing).rejects.toThrow("判定の失敗");
       expect(await repository.findAttempt(attemptId)).toMatchObject({ status: "CREATING", btcpayInvoiceId: null });
+    });
+  });
+
+  describe("loadForAttempt と saveObservation", () => {
+    // 紐づけ済み（NEW・AWAITING_PAYMENT・version 1）の Payment と、処理中の inbox の行を作る
+    async function attachedWithInbox() {
+      const { payment } = await reserve();
+      const attemptId = payment.currentAttempt.id;
+      await attach(attemptId);
+      const inboxId = randomUUID();
+      await prisma.inbox.create({ data: { id: inboxId, source: "BTCPAY", eventId: randomUUID(), payload: "{}" } });
+      return { paymentId: payment.paymentId, attemptId, inboxId };
+    }
+
+    async function decideAndSave(attemptId: string, inboxId: string, observation: InvoiceObservation, versionOffset = 0) {
+      const loaded = await repository.loadForAttempt(attemptId);
+      if (!loaded) throw new Error("試行がない");
+      const result = applyObservation(loaded.state, attemptId, observation);
+      return repository.saveObservation({
+        paymentId: loaded.paymentId,
+        expectedVersion: loaded.version + versionOffset,
+        attemptId,
+        result,
+        inboxId,
+      });
+    }
+
+    it("試行の Payment の状態・version・紐づいた invoice を返す。なければ null", async () => {
+      const { paymentId, attemptId } = await attachedWithInbox();
+
+      const loaded = await repository.loadForAttempt(attemptId);
+
+      expect(loaded).toMatchObject({
+        paymentId,
+        version: 1,
+        btcpayInvoiceId: expect.any(String),
+        state: {
+          status: "AWAITING_PAYMENT",
+          currentAttemptId: attemptId,
+          attempts: [{ id: attemptId, status: "NEW", invalidatedByUs: false, paymentDetected: false }],
+          flags: [],
+        },
+      });
+      expect(await repository.loadForAttempt(randomUUID())).toBeNull();
+    });
+
+    it("保存すると、試行・Payment・フラグを更新し、version を上げ、同じ commit で inbox の行を DONE にする", async () => {
+      const { paymentId, attemptId, inboxId } = await attachedWithInbox();
+
+      expect(await decideAndSave(attemptId, inboxId, { status: "PROCESSING", received: "OVER" })).toEqual({ saved: true });
+
+      const row = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId }, include: { reviewFlags: true } });
+      expect(row).toMatchObject({ status: "CONFIRMING", version: 2, shopifySync: "PENDING" });
+      expect(row.reviewFlags).toMatchObject([{ reason: "OVERPAID", attemptId }]);
+      expect(await prisma.invoiceAttempt.findUniqueOrThrow({ where: { id: attemptId } })).toMatchObject({
+        status: "PROCESSING",
+        paymentDetected: true,
+      });
+      expect(await prisma.inbox.findUniqueOrThrow({ where: { id: inboxId } })).toMatchObject({ status: "DONE" });
+    });
+
+    it("試行だけが変わる場合も version を上げるが、Shopify への反映待ちにはしない", async () => {
+      const { paymentId, attemptId, inboxId } = await attachedWithInbox();
+      await prisma.payment.update({ where: { id: paymentId }, data: { shopifySync: "DONE" } });
+
+      // NEW のままの一部入金。status もフラグも変わらない
+      expect(await decideAndSave(attemptId, inboxId, { status: "NEW", received: "PARTIAL" })).toEqual({ saved: true });
+
+      const row = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+      expect(row).toMatchObject({ status: "AWAITING_PAYMENT", version: 2, shopifySync: "DONE" });
+      expect(await prisma.invoiceAttempt.findUniqueOrThrow({ where: { id: attemptId } })).toMatchObject({
+        paymentDetected: true,
+      });
+    });
+
+    it("読んだ後に version が変わっていたら何も保存せず、inbox の行も PENDING のまま", async () => {
+      const { paymentId, attemptId, inboxId } = await attachedWithInbox();
+
+      // 読んだ version と違う値を渡し、別の処理が先に更新した状況にする
+      const result = await decideAndSave(attemptId, inboxId, { status: "PROCESSING", received: "OVER" }, -1);
+
+      expect(result).toEqual({ saved: false });
+      const row = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId }, include: { reviewFlags: true } });
+      expect(row).toMatchObject({ status: "AWAITING_PAYMENT", version: 1, reviewFlags: [] });
+      expect(await prisma.invoiceAttempt.findUniqueOrThrow({ where: { id: attemptId } })).toMatchObject({ status: "NEW" });
+      expect(await prisma.inbox.findUniqueOrThrow({ where: { id: inboxId } })).toMatchObject({ status: "PENDING" });
     });
   });
 

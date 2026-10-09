@@ -25,6 +25,9 @@ services:
       BTCPAY_BTCEXPLORERURL: http://nbxplorer:32838/
       BTCPAY_DEBUGLOG: btcpay.log
       BTCPAY_DOCKERDEPLOYMENT: "true"
+      # Docker Desktop 29 は host.docker.internal に IPv6 のアドレスも返す。.NET はそちらを選び、
+      # コンテナに IPv6 の経路がないので Webhook が「Network is unreachable」で届かない。IPv4 だけを使わせる
+      DOTNET_SYSTEM_NET_DISABLEIPV6: "1"
     # BTCPay から Webhook をホスト（アプリ / W1 の仮エンドポイント）に送るため。
     # Docker Desktop では不要だが、Linux（CI）でも同じ名前で届くように明示する。
     extra_hosts:

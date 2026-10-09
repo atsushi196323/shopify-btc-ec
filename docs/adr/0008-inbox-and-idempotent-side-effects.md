@@ -51,3 +51,27 @@ DB と外部システム（BTCPay、Shopify）を1つのトランザクション
 - W2 のこのルートは、受け取って 200 を返し、種類と invoice ID をログに出すだけ。署名の検証・inbox・ワーカーは W3 で実装する。
   署名を検証していないので、ペイロードの値はどの処理にも使わない。
 - この間に捨てたイベントで状態を取りこぼしても、ワーカーとスイープは Greenfield から状態を取り直すので（決定の2）、W3 の照合が追いつかせる。
+
+## W3 で決めたこと（2026-10-09、Webhook の受信とワーカー）
+- 受信は `src/adapters/btcpay/webhook-handler.ts`（ルートと統合テストの両方から使う）。生のボディで `BTCPay-Sig` を検証し（不一致は 401）、
+  invoice に関係するイベントだけを inbox に保存して 200 を返す。ワーカーは同じプロセスで起動し、応答はその終わりを待たない。
+- inbox の重複の除去には `deliveryId` を使う。payload には、署名を検証したイベントのうち種類と invoice ID だけを保存する。
+- ワーカーは `src/application/process-btcpay-event.ts`。決定の2・3のとおり、Greenfield から取り直し（トランザクションの外）、
+  version 付きで保存し、競合したら DB だけを読み直して再判定する（最大3回）。上限に達するか例外が出たら PENDING のまま回数とエラーを記録し、
+  合計10回で FAILED にする。保存と同じ commit で inbox の行を DONE にする。
+  失敗の記録は try の外で1回だけ行う（記録そのものが失敗したら例外を返し、回数を二重に数えない）。記録の時点で別の処理が DONE にしていたら、処理済みとして扱う。
+- 次のイベントは、何もせずに DONE にする（IGNORED）。
+  - `orderId` 欄がない invoice（BTCPay の管理画面で手で作ったものなど）。アダプタが `ForeignInvoiceError` で知らせる
+  - `orderId` 欄が、このアプリの試行に当たらない invoice
+  - 試行に紐づかなかった方の invoice（ADR 5 の「同じ試行に invoice が2つできる場合」）
+- invoice の作成の直後に届き、試行に invoice がまだ紐づいていないイベントは、PENDING のまま残す（紐づけの後に再処理する）。
+- 無効化（`attemptToInvalidate`）と Shopify への反映は、ワーカーの結果として呼び出し側に返す。呼ぶ処理は次の PR で実装する。
+- **BTCPay の自動再送は切る**（`infra/regtest/bootstrap.sh`）。BTCPay 2.4.4 は、配信に失敗すると再送の待ち（10秒・1分・10分…）が明けるまで、
+  同じ Webhook の後続の配信を止める。アプリを止めていた後は、新しい invoice のイベントが10分以上届かなくなった（regtest で確認）。
+  取りこぼしたイベントは決定の2のとおり、スイープが Greenfield から取り直すので、自動再送がなくても状態は収束する。スイープ（W4）ができるまでは、
+  アプリが止まっていた間のイベントは反映されない。
+- テスト:
+  - 単体・アダプタ: `tests/adapter/btcpay/webhook.test.ts`（本物の BTCPay の配信の本体と、openssl で計算した署名のベクタ）、
+    `tests/adapter/db/prisma-inbox-repository.test.ts`、`tests/application/process-btcpay-event.test.ts`（二重払いを並列に処理して DOUBLE_PAYMENT がちょうど1件。
+    version の確認を外すと失敗することを確かめた）
+  - 統合: `tests/integration/btcpay-webhook-worker.test.ts`。テストプロセスが port 3000 で Webhook を受け、本物の secret で署名を検証し、入金と1ブロックで PAID まで進む。
