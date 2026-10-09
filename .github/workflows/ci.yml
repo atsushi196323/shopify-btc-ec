@@ -59,6 +59,11 @@ jobs:
           cache: pnpm
           cache-dependency-path: apps/shop-app/pnpm-lock.yaml
 
+      # compose が公開するポート（32838・39372・43782・49392）は、Linux が一時的な通信に割り当てる範囲（既定 32768〜60999）に入っている。
+      # ランナー上の別の通信と重なると「address already in use」で起動できないので、一時的な通信の範囲をこれらより上に寄せる
+      - name: 一時的な通信のポートを compose のポートと重ならない範囲にする
+        run: sudo sysctl -w net.ipv4.ip_local_port_range="50000 65000"
+
       # 依存サービスだけを compose で起動する。アプリはテストプロセスの中で組み立てる（ADR 10）。
       # BTCPay の Webhook は host.docker.internal:3000（Linux では extra_hosts の host-gateway）でテストプロセスに届く
       - name: regtest の依存サービスを起動する
