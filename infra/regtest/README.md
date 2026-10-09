@@ -107,3 +107,12 @@ postgres より先に NBXplorer が起動すると、NBXplorer は DB 接続に�
 ```sh
 docker compose -f infra/regtest/docker-compose.yml restart nbxplorer btcpayserver
 ```
+
+NBXplorer のログが `Node state changed: NotStarted => CoreSynching` で止まっている場合は、別の原因で止まっている。
+最後のブロックが古い（目安は24時間以上前）と、bitcoind は初期同期中（`initialblockdownload: true`）として扱い、NBXplorer は同期の完了を待ち続ける。
+1ブロック生成すると戻る（`cli` は「0. 準備」で定義したもの。2026-10-09 に確認）。
+
+```sh
+cli getblockchaininfo | grep initialblockdownload   # true なら次へ
+cli -rpcwallet=default -generate 1
+```
