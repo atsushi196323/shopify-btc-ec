@@ -68,3 +68,12 @@ BTCPay にだけ invoice が残る（孤児）。
   空文字の環境変数は設定なしとして扱い、ファイルの値を使う。
 - Shopify は Webhook の応答を約5秒しか待たないが、BTCPay の呼び出しの上限は 10 秒にしている。超えた場合は 5.1 の想定どおり、再送は既存の行を返し、
   BTCPay で作られた invoice はスイープの孤児回復が `orderId` で見つけて紐づける。スイープ（W4）ができるまでは、その試行は CREATING のまま残る（拡張は作成中として待つ）。
+
+## W2 で確かめたこと（2026-10-09、シナリオ7）
+- テストは `apps/shop-app/tests/integration/scenario-07-concurrent-create.test.ts`。本物の BTCPay（regtest）・本物の SQLite・フェイクの Shopify で、
+  `createInvoiceForOrder`（orders/create の入口）と `invoiceForExtension`（拡張 API の入口）を10並列ずつ呼ぶ。
+- ルート（認証と受け渡しだけ）は通さず、テストプロセスでユースケースに依存を組み立てて渡す。ルートの認証は Shopify のセッションに依存し、フェイクに差し替えられないため。
+- テスト用デコレータ（`tests/helpers/btcpay-decorator.ts`）で、BTCPay への作成の直前に 500ms 待たせ、予約に勝った呼び出しが戻る前に残りが既存の行を読む状況を作る。
+  例外の注入はシナリオ8（W4）で加える。
+- 結果: DB の Payment と試行はどちらも1件、BTCPay への作成依頼は1回、この注文の invoice（`metadata.shopifyOrderId` で絞る）も1件。
+  勝った1件以外の19件は CREATING を読み、Webhook は EXISTING、拡張は「準備中」を返した。作成後の問い合わせは同じ checkout link を返す。
