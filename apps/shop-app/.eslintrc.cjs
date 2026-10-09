@@ -19,7 +19,8 @@ module.exports = {
     commonjs: true,
     es6: true,
   },
-  ignorePatterns: ["!**/.server", "!**/.client"],
+  // extensions/*/shopify.d.ts は Shopify CLI が生成する（手で直しても上書きされる）
+  ignorePatterns: ["!**/.server", "!**/.client", "extensions/*/shopify.d.ts"],
 
   // Base config
   extends: ["eslint:recommended"],
@@ -74,6 +75,18 @@ module.exports = {
         "plugin:import/recommended",
         "plugin:import/typescript",
       ],
+    },
+
+    // Checkout UI 拡張（extensions/*/src）。props の型は使わない（PropTypes は拡張の実行環境に入れない）。
+    // process.env.APP_URL は Shopify CLI がビルド時に埋め込む（ADR 1）
+    {
+      files: ["extensions/*/src/**/*.{js,jsx}"],
+      globals: {
+        process: "readonly",
+      },
+      rules: {
+        "react/prop-types": "off",
+      },
     },
 
     // Node

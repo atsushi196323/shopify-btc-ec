@@ -1,11 +1,20 @@
-# 型チェックと、単体・アダプタのテスト（Docker を使わないもの）を PR ごとに流す。
-# 本物の BTCPay と bitcoind を使う統合テストの CI は W4 で追加する（ADR 10）
+# PR と main への push のたびに流す（ADR 10）。
+# - test: lint・型チェック・単体とアダプタのテスト（Docker を使わないもの）
+# - integration: 本物の BTCPay と bitcoind（regtest）を compose で起動し、統合テストを流す
 name: CI
 
 on:
   pull_request:
   push:
     branches: [main]
+
+permissions:
+  contents: read
+
+# 同じ PR に続けて push したら、古い実行は止める
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -30,5 +39,42 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm prisma generate
+      - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: apps/shop-app/package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/shop-app/pnpm-lock.yaml
+
+      # 依存サービスだけを compose で起動する。アプリはテストプロセスの中で組み立てる（ADR 10）。
+      # BTCPay の Webhook は host.docker.internal:3000（Linux では extra_hosts の host-gateway）でテストプロセスに届く
+      - name: regtest の依存サービスを起動する
+        run: docker compose -f infra/regtest/docker-compose.yml up -d
+
+      # BTCPay の同期を待ち、管理者・API キー・ストア・固定レート・ウォレット・Webhook を作る。値は infra/regtest/.bootstrap.env に書き出す
+      - name: BTCPay を初期設定する
+        run: infra/regtest/bootstrap.sh
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: apps/shop-app
+      - run: pnpm prisma generate
+        working-directory: apps/shop-app
+      - run: pnpm test:integration
+        working-directory: apps/shop-app
+
+      - name: 失敗したら依存サービスのログを出す
+        if: failure()
+        run: docker compose -f infra/regtest/docker-compose.yml logs --tail 200
