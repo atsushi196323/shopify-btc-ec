@@ -85,7 +85,7 @@ model Payment {
   id               String        @id
   shopifyOrderId   String        @unique
   status           PaymentStatus @default(CREATING)
-  // 楽観ロック用。状態・フラグ・ポインタを変えるたびに +1 する
+  // 楽観ロック用。状態・フラグ・ポインタ・試行を変えるたびに +1 する（試行を含める理由は ADR 6 の直列化）
   version          Int           @default(0)
   currentAttemptId String?       @unique
   // Shopify への反映待ち（design.md 4章）。status かフラグを変えるトランザクションで PENDING にする

@@ -26,3 +26,11 @@ export interface BtcpayGateway {
   // 孤児の回復で使う（ADR 5）。通常は0件か1件。複数あったときの扱いは呼び出し側が決める
   findInvoicesByAttemptId(attemptId: string): Promise<BtcpayInvoice[]>;
 }
+
+// orderId 欄に試行の id がない invoice（BTCPay の管理画面で手で作ったものなど）。このアプリの試行には結びつかない
+export class ForeignInvoiceError extends Error {
+  constructor(readonly invoiceId: string) {
+    super(`BTCPay の invoice ${invoiceId} に orderId がない`);
+    this.name = "ForeignInvoiceError";
+  }
+}

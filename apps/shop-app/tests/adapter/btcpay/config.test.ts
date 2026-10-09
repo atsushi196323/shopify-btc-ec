@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadGreenfieldConfig } from "../../../src/adapters/btcpay/config";
+import { loadGreenfieldConfig, loadWebhookSecret } from "../../../src/adapters/btcpay/config";
 
 describe("loadGreenfieldConfig", () => {
   function bootstrapEnv(text: string): string {
@@ -39,5 +39,18 @@ describe("loadGreenfieldConfig", () => {
     expect(() => loadGreenfieldConfig({ BTCPAY_URL: "http://localhost:49392" }, "/nonexistent/.bootstrap.env")).toThrow(
       "BTCPay の設定がない",
     );
+  });
+
+  describe("loadWebhookSecret", () => {
+    it(".bootstrap.env の secret を読み、環境変数があればそちらを優先する", () => {
+      const path = bootstrapEnv("BTCPAY_WEBHOOK_SECRET=from-file\n");
+
+      expect(loadWebhookSecret({}, path)).toBe("from-file");
+      expect(loadWebhookSecret({ BTCPAY_WEBHOOK_SECRET: "from-env" }, path)).toBe("from-env");
+    });
+
+    it("secret がなければ例外にする", () => {
+      expect(() => loadWebhookSecret({}, "/nonexistent/.bootstrap.env")).toThrow("Webhook の secret がない");
+    });
   });
 });

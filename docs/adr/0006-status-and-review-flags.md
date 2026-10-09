@@ -43,6 +43,11 @@ status かフラグが変わったら PENDING にし、反映が追いついた�
 DOUBLE_PAYMENT を検知できない。そこで、**Payment の `version` 列による楽観ロック**で Payment 単位に直列化する。
 競合したら DB を読み直して再判定する。悲観ロック（`SELECT ... FOR UPDATE`）は SQLite に相当する機能がなく、移植性が落ちるので採用しない。
 
+**version は試行だけが変わるときも上げる（2026-10-09、W3 のワーカー）**: design.md 3章は「状態・フラグ・ポインタを変えるたびに +1」としているが、
+NEW のままの一部入金のように `paymentDetected` だけが変わる保存でも version を上げる。DOUBLE_PAYMENT の判定はほかの試行の入金（`paymentDetected`）を見るので、
+これを上げないと、片方の保存と並行したもう片方の判定が競合として検出されず、不変条件2が破れうる。Shopify への反映待ち（`shopifySync`）にはしない。
+invoice の紐づけ（`attachInvoice`）も試行を必ず変えるので、status やフラグが変わらない場合（外から無効化された入金のない invoice を回復で紐づけた場合など）も version を上げる。
+
 ## ドメインの実装で判断したこと（2026-10-04）
 `src/domain/` の実装中に、design.md 4章に書いていない細部を次のとおり決めた。
 - **試行の NEW → INVALID を許す**: 4章の図は INVALID を PROCESSING の下にだけ描いているが、こちらで無効化した未入金の invoice は

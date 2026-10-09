@@ -1,5 +1,10 @@
 // BtcpayGateway を BTCPay Server の Greenfield API で実装する。
-import type { BtcpayGateway, BtcpayInvoice, CreateInvoiceInput } from "../../application/ports/btcpay-gateway";
+import {
+  ForeignInvoiceError,
+  type BtcpayGateway,
+  type BtcpayInvoice,
+  type CreateInvoiceInput,
+} from "../../application/ports/btcpay-gateway";
 import { toObservation } from "./invoice-observation";
 
 export type GreenfieldConfig = {
@@ -88,7 +93,7 @@ export class GreenfieldClient implements BtcpayGateway {
 function toBtcpayInvoice(invoice: GreenfieldInvoice): BtcpayInvoice {
   const attemptId = invoice.metadata?.orderId;
   // このアプリが作った invoice には必ず orderId がある。ない invoice は試行に結びつけられない
-  if (!attemptId) throw new Error(`BTCPay の invoice ${invoice.id} に orderId がない`);
+  if (!attemptId) throw new ForeignInvoiceError(invoice.id);
   return {
     invoiceId: invoice.id,
     attemptId,

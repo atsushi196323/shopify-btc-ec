@@ -34,6 +34,25 @@ export type AttachInvoiceInput = {
 // attached: false は、試行がすでに CREATING でない（別の処理が先に紐づけた）ことを表す
 export type AttachInvoiceResult = { attached: boolean; payment: PaymentSnapshot };
 
+// ワーカーが判定に使う、試行の Payment の現在の様子（design.md 5.3 の 3）
+export type PaymentForAttempt = {
+  paymentId: string;
+  // 楽観ロック用。保存のときに、読んだときから変わっていないことを確かめる（ADR 6 の直列化）
+  version: number;
+  state: PaymentState;
+  // この試行に紐づいた invoice。CREATING の間は null
+  btcpayInvoiceId: string | null;
+};
+
+export type SaveObservationInput = {
+  paymentId: string;
+  expectedVersion: number;
+  attemptId: string;
+  result: ObservationResult;
+  // 同じ commit で DONE にする inbox の行（ADR 8 の決定4）
+  inboxId: string;
+};
+
 export interface PaymentRepository {
   findByShopifyOrderId(shopifyOrderId: string): Promise<PaymentSnapshot | null>;
   findAttempt(attemptId: string): Promise<AttemptSnapshot | null>;
@@ -41,4 +60,7 @@ export interface PaymentRepository {
   reserve(input: ReserveInput): Promise<ReserveResult>;
   // CREATING の試行に BTCPay の invoice を紐づけ、decide の結果を保存する
   attachInvoice(input: AttachInvoiceInput): Promise<AttachInvoiceResult>;
+  loadForAttempt(attemptId: string): Promise<PaymentForAttempt | null>;
+  // 判定の結果を version 付きで保存する。saved: false は、読んだ後に別の処理が先に更新した（version が変わっていた）ことを表す
+  saveObservation(input: SaveObservationInput): Promise<{ saved: boolean }>;
 }

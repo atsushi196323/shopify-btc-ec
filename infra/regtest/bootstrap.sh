@@ -94,16 +94,20 @@ else
   log "ウォレットを作成した"
 fi
 
-# 3. Webhook。secret は作成時にしか返らないので、前回の secret がなければ作り直す
+# 3. Webhook。secret は作成時にしか返らないので、前回の secret がなければ作り直す。
+# 自動再送は切る。BTCPay は再送の待ち（10秒・1分・10分…）の間、同じ Webhook の後続の配信を止めるので、
+# アプリが止まっていた後は新しいイベントが長く届かなくなる。取りこぼしたイベントはスイープが Greenfield から取り直す（ADR 8）
+WEBHOOK_SETTINGS="\"url\":\"$WEBHOOK_URL\",\"enabled\":true,\"automaticRedelivery\":false,\"authorizedEvents\":{\"everything\":true}"
 WEBHOOK_SECRET=""
 [[ -f $ENV_FILE ]] && WEBHOOK_SECRET=$(sed -n 's/^BTCPAY_WEBHOOK_SECRET=//p' "$ENV_FILE")
 WEBHOOK_ID=$(api GET "/api/v1/stores/$STORE_ID/webhooks" | jq -r --arg u "$WEBHOOK_URL" '[.[] | select(.url == $u)][0].id // empty')
 if [[ -n $WEBHOOK_ID && -n $WEBHOOK_SECRET ]]; then
-  log "Webhook は作成済み ($WEBHOOK_URL)"
+  # 作成済みでも設定はそろえる（secret は変えない）
+  api PUT "/api/v1/stores/$STORE_ID/webhooks/$WEBHOOK_ID" "{$WEBHOOK_SETTINGS,\"secret\":\"$WEBHOOK_SECRET\"}" >/dev/null
+  log "Webhook は作成済み。設定をそろえた ($WEBHOOK_URL)"
 else
   [[ -n $WEBHOOK_ID ]] && api DELETE "/api/v1/stores/$STORE_ID/webhooks/$WEBHOOK_ID" >/dev/null
-  WEBHOOK_SECRET=$(api POST "/api/v1/stores/$STORE_ID/webhooks" \
-    "{\"url\":\"$WEBHOOK_URL\",\"enabled\":true,\"automaticRedelivery\":true,\"authorizedEvents\":{\"everything\":true}}" | jq -r .secret)
+  WEBHOOK_SECRET=$(api POST "/api/v1/stores/$STORE_ID/webhooks" "{$WEBHOOK_SETTINGS}" | jq -r .secret)
   log "Webhook を作成した ($WEBHOOK_URL)"
 fi
 

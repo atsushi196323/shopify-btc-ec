@@ -79,7 +79,7 @@ node infra/regtest/webhook-echo.mjs
 
 ```sh
 curl -s -X POST $B/api/v1/stores/$SID/webhooks -H "$H" -H 'Content-Type: application/json' \
-  -d '{"url":"http://host.docker.internal:3000/webhooks/btcpay","enabled":true,"automaticRedelivery":true,"authorizedEvents":{"everything":true}}'
+  -d '{"url":"http://host.docker.internal:3000/webhooks/btcpay","enabled":true,"automaticRedelivery":false,"authorizedEvents":{"everything":true}}'
 ```
 
 返ってくる `secret` が、`BTCPay-Sig`（ボディの HMAC-SHA256）の検証に使う鍵になる。

@@ -23,6 +23,16 @@ export function loadGreenfieldConfig(
   return { baseUrl, apiKey, storeId };
 }
 
+// Webhook の署名の鍵（BTCPay-Sig の検証に使う）。読み方は loadGreenfieldConfig と同じ
+export function loadWebhookSecret(
+  env: Record<string, string | undefined> = process.env,
+  bootstrapEnvPath = BOOTSTRAP_ENV_PATH,
+): string {
+  const secret = env.BTCPAY_WEBHOOK_SECRET?.trim() || readEnvFile(bootstrapEnvPath).BTCPAY_WEBHOOK_SECRET;
+  if (!secret) throw new Error("BTCPay の Webhook の secret がない。infra/regtest/bootstrap.sh を実行する（infra/regtest/README.md）");
+  return secret;
+}
+
 // KEY=VALUE の行だけを読む。ファイルがなければ空
 function readEnvFile(path: string): Record<string, string> {
   let text: string;
