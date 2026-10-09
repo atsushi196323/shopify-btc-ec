@@ -79,3 +79,14 @@ ESM と CommonJS で別々に読み込まれている可能性が高いが、原
 - Docker Desktop 29.8 では、コンテナの `/etc/hosts` に `host.docker.internal` の IPv6 アドレスも入る。BTCPay（.NET）はそちらを選び、
   コンテナに IPv6 の経路がないので、Webhook が `Network is unreachable` で届かなかった（IPv4 の 192.168.65.254 には届く）。
 - compose の BTCPay に `DOTNET_SYSTEM_NET_DISABLEIPV6=1` を設定し、IPv4 だけを使わせる。CI（Linux）の `host-gateway` には影響しない。
+
+## 追記（2026-10-09）: lint と統合テストを CI に加える（W4 から前倒し）
+- `.github/workflows/ci.yml` に統合テストのジョブ（`integration`）を加えた。`docker compose up -d` → `bootstrap.sh` → `pnpm test:integration` の順で流す。
+  BTCPay の Webhook は、Linux でも `extra_hosts` の `host-gateway` でテストプロセス（port 3000）に届いた（初回の実行で12件が通過、約1分20秒）。
+- 上の「追記（2026-10-06）」では、シナリオが揃っていないので統合テストの CI は W4 に回すとしていた。実際には、ジョブはシナリオを足しても変わらない
+  （`tests/integration/` に置けば流れる）ので、作り直しにならないと判断した。W4 の GitHub Actions の作業から時間を前借りした扱いにする。
+- lint も CI に加えた。エラーはすべて拡張の中にあったので、設定で次のとおり扱う（`.eslintrc.cjs`）。
+  - `extensions/*/shopify.d.ts` は Shopify CLI が生成するので、lint の対象から外す。
+  - 拡張のソースでは `process` を既知の変数にする（`process.env.APP_URL` は CLI がビルド時に埋め込む。ADR 1）。props の型の検査（`react/prop-types`）は切る。
+- あわせて、トークンの権限を `contents: read` に明示し、同じ PR に続けて push したときは古い実行を止める（`concurrency`）。
+- マージの前に CI の成功を必須にする設定（ブランチ保護）は、非公開リポジトリの無料プランでは使えない。今は、マージの前に CI の結果を手で確かめる。
