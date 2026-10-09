@@ -44,6 +44,30 @@
 - 無効化した invoice に入金したときの BTCPay の挙動（どの Webhook が送られるか、Greenfield での見え方）を regtest で確認する。
   想定と違えば、検知方法（ウォレットのアドレス監視に切り替えるかなど）をその時点で決め、ここに記録する。
 
+## 未検証事項の確認結果（2026-10-09、regtest の BTCPay 2.4.4）
+Greenfield の `POST /invoices/{id}/status`（`Invalid`）で無効化した invoice について、次の3つを試した。
+
+| 試したこと | 無効化の応答 | invoice の `status` / `additionalStatus` | `payment-methods` | 届いた Webhook |
+|---|---|---|---|---|
+| A: 未入金で無効化し、その後に全額を入金・1ブロック | 200 | `Invalid` / `Marked` のまま変わらない | `totalPaid` = 全額、`payments` が Processing → Settled | `InvoiceReceivedPayment`・`InvoicePaymentSettled`（`afterExpiration: true`） |
+| B: 一部入金（NEW・PaidPartial）の後に無効化 | 200 | `Invalid` / `Marked` | `totalPaid` = 一部の額 | `InvoiceInvalid`（`manuallyMarked: true`）、後で `InvoicePaymentSettled` |
+| C: 全額入金（Processing）の後に無効化 | 200 | `Invalid` / `Marked` | `totalPaid` = 全額 | `InvoiceInvalid`（`manuallyMarked: true`）、後で `InvoicePaymentSettled` |
+
+- **想定と違った点**: 無効化した invoice への入金は、invoice の `status` / `additionalStatus` に現れない（`Invalid` / `Marked` のまま）。
+  入金は `payment-methods` の `totalPaid` と `payments` にだけ記録される。今のアダプタは `Marked` を「入金なし」（NONE）に変換するので、
+  Webhook が届いてワーカーが取り直しても、この入金を見落とす（DOUBLE_PAYMENT が付かない）。
+- **BTCPay は入金のある invoice の無効化も受け付ける**（B・C）。「無効化の直前に入金された」場合も、無効化は成功し、invoice の状態からは入金が読めなくなる。
+- Webhook は届くので、入金の契機の検知はウォレットのアドレス監視に切り替えなくてよい。スイープの照合（無効化から一定期間）は、Webhook を取りこぼした場合の予備として予定どおり残す。
+
+### 決定（検知方法）
+- **`Invalid` の invoice は、アダプタで `payment-methods` の `totalPaid` も取得し、入金の様子（`received`）をそこから決める**。
+  `totalPaid` が 0 なら NONE、全額に届いていれば FULL（超えていれば OVER）、届いていなければ PARTIAL とする。
+  ドメインは変えない。INVALID の試行に入金があれば、`invalidatedByUs` の試行では DOUBLE_PAYMENT（相手に入金がある場合）、
+  そうでない試行では INVALID_PAYMENT になる（ADR 6 の判定のまま）。
+- 実装は W3 の無効化の PR で行い、シナリオ2（古い invoice への期限後の入金で、新しい invoice を無効化する）で、無効化後の入金も確かめる。
+- 未確認のまま残すこと: 監視期間（ストアの `monitoringExpiration` = 300秒）を過ぎた後に、無効化した invoice へ入金があった場合の扱い。
+  今回の入金は無効化の数秒後だった。本番で監視期間をどう取るかと合わせて、既知の制限に書く。
+
 ## 結果
 - テスト: シナリオ1〜4。シナリオ2 では、古い invoice への期限後の入金で新しい invoice が無効化されることも確認する。
 - 注文の自動キャンセルは stretch。
