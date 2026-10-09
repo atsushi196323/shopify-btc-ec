@@ -62,6 +62,6 @@ Thank you ページの拡張から、アプリの API（`POST /invoice {shopifyO
 - checkout link は DB に持たず、支払い待ちのときだけ Greenfield で invoice を取って得る（作った直後は作成の結果を使う）。
   問い合わせのたびに BTCPay を1回呼ぶが、スキーマを変えずに済む。
 - 拡張の `orderConfirmation.order.id` は、型の説明では Order の GID。OrderIdentity の GID で届いても同じ数字の Order の GID にそろえる。
-  実際にどちらで届くかは、拡張の UI を作るときに確かめる。
+  手動の E2E（2026-10-08）で、実際には OrderIdentity の GID で届くことを確かめた（ADR 1）。
 - テスト: `tests/application/extension-invoice.test.ts`（DB は本物の SQLite、BTCPay と Shopify はフェイク）、`tests/adapter/shopify/extension-request.test.ts`。
   ルートとセッショントークンの検証は、拡張の UI をつないだ後の手動の E2E で確かめる。

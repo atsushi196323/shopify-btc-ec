@@ -68,8 +68,8 @@ if [[ -z $API_KEY ]] || ! curl -sf "$BTCPAY_URL/api/v1/users/me" -H "Authorizati
   log "API キーを作成した"
 fi
 
-# ストア（ADR 9・10: JPY、1 conf、支払い許容誤差 0%、期限 60秒）
-STORE_SETTINGS='{"name":"'"$STORE_NAME"'","defaultCurrency":"JPY","speedPolicy":"MediumSpeed","paymentTolerance":0,"invoiceExpiration":60,"monitoringExpiration":300}'
+# ストア（ADR 9・10: JPY、1 conf、支払い許容誤差 0%、期限 180秒）
+STORE_SETTINGS='{"name":"'"$STORE_NAME"'","defaultCurrency":"JPY","speedPolicy":"MediumSpeed","paymentTolerance":0,"invoiceExpiration":180,"monitoringExpiration":300}'
 STORE_ID=$(api GET /api/v1/stores | jq -r --arg n "$STORE_NAME" '[.[] | select(.name == $n)][0].id // empty')
 if [[ -n $STORE_ID ]]; then
   api PUT "/api/v1/stores/$STORE_ID" "$STORE_SETTINGS" >/dev/null

@@ -1,4 +1,4 @@
-# ADR 1 の未検証事項の確認用（W2）: Thank you ページの拡張から、アプリの API を呼べるか
+# Thank you ページに Bitcoin の支払いリンクと状態を表示する拡張（design.md 5.2、ADR 1・4）
 api_version = "2026-07"
 
 [[extensions]]

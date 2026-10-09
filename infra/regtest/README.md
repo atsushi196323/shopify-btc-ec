@@ -25,7 +25,7 @@ API キーを新しく作れなくなる。`.bootstrap.env` を消してしま�
 |---|---|
 | BTCPay 管理者 | `admin@example.com` / `Passw0rd!regtest` |
 | 固定レート | `BTC_JPY = 10000000`（1円 = 10 sat） |
-| ストア | JPY、Speed Policy は MediumSpeed（1 conf）、支払い許容誤差 0%、期限 60秒（ADR 9・10） |
+| ストア | JPY、Speed Policy は MediumSpeed（1 conf）、支払い許容誤差 0%、期限 180秒（ADR 9・10） |
 
 以下はリポジトリのルートで実行する。
 
@@ -58,7 +58,7 @@ K=$(curl -s -u 'admin@example.com:Passw0rd!regtest' -X POST $B/api/v1/api-keys -
 H="Authorization: token $K"
 
 SID=$(curl -s -X POST $B/api/v1/stores -H "$H" -H 'Content-Type: application/json' \
-  -d '{"name":"regtest-store","defaultCurrency":"JPY","speedPolicy":"MediumSpeed","paymentTolerance":0,"invoiceExpiration":60,"monitoringExpiration":300}' \
+  -d '{"name":"regtest-store","defaultCurrency":"JPY","speedPolicy":"MediumSpeed","paymentTolerance":0,"invoiceExpiration":180,"monitoringExpiration":300}' \
   | jq -r .id)
 
 curl -s -X PUT $B/api/v1/stores/$SID/rates/configuration/primary -H "$H" -H 'Content-Type: application/json' \
@@ -86,7 +86,7 @@ curl -s -X POST $B/api/v1/stores/$SID/webhooks -H "$H" -H 'Content-Type: applica
 
 ## 4. invoice の作成・支払い・ブロック生成
 
-期限が 60秒なので、作成から送金までを続けて実行する。
+期限が 180秒なので、作成から送金までを続けて実行する。
 
 ```sh
 IID=$(curl -s -X POST $B/api/v1/stores/$SID/invoices -H "$H" -H 'Content-Type: application/json' \
