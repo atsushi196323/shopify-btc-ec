@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaPaymentRepository } from "../../../src/adapters/db/prisma-payment-repository";
 import { applyObservation, reissue, type InvoiceObservation } from "../../../src/domain/payment";
 import { createTestDb } from "../../helpers/test-db";
+import { TEST_SHOP } from "../../helpers/orders";
 
 // 予約（design.md 3章「作成の順序と不変条件」、ADR 5・7）と、invoice の紐づけ
 describe("PrismaPaymentRepository", () => {
@@ -21,7 +22,7 @@ describe("PrismaPaymentRepository", () => {
   });
 
   const reserve = (shopifyOrderId = randomUUID()) =>
-    repository.reserve({ paymentId: randomUUID(), attemptId: randomUUID(), shop: "test-shop.myshopify.com", shopifyOrderId });
+    repository.reserve({ paymentId: randomUUID(), attemptId: randomUUID(), shop: TEST_SHOP, shopifyOrderId });
 
   const attach = (attemptId: string, observation: InvoiceObservation = { status: "NEW", received: "NONE" }) =>
     repository.attachInvoice({
@@ -36,13 +37,13 @@ describe("PrismaPaymentRepository", () => {
       const paymentId = randomUUID();
       const attemptId = randomUUID();
 
-      const result = await repository.reserve({ paymentId, attemptId, shop: "test-shop.myshopify.com", shopifyOrderId });
+      const result = await repository.reserve({ paymentId, attemptId, shop: TEST_SHOP, shopifyOrderId });
 
       expect(result).toEqual({
         reserved: true,
         payment: {
           paymentId,
-          shop: "test-shop.myshopify.com",
+          shop: TEST_SHOP,
           shopifyOrderId,
           status: "CREATING",
           version: 0,
@@ -50,7 +51,7 @@ describe("PrismaPaymentRepository", () => {
         },
       });
       const row = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
-      expect(row).toMatchObject({ shop: "test-shop.myshopify.com", currentAttemptId: attemptId, shopifySync: "DONE" });
+      expect(row).toMatchObject({ shop: TEST_SHOP, currentAttemptId: attemptId, shopifySync: "DONE" });
     });
 
     it("同じ shopifyOrderId では負け、既存の Payment を返す。負けた側の行は残らない", async () => {
@@ -60,7 +61,7 @@ describe("PrismaPaymentRepository", () => {
       const second = await repository.reserve({
         paymentId: randomUUID(),
         attemptId: loserAttemptId,
-        shop: "test-shop.myshopify.com",
+        shop: TEST_SHOP,
         shopifyOrderId: first.payment.shopifyOrderId,
       });
 
@@ -289,7 +290,7 @@ describe("PrismaPaymentRepository", () => {
 
       expect(await repository.loadForSync(paymentId)).toEqual({
         paymentId,
-        shop: "test-shop.myshopify.com",
+        shop: TEST_SHOP,
         shopifyOrderId,
         status: "AWAITING_PAYMENT",
         version: 1,

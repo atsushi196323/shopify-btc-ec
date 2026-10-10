@@ -7,6 +7,7 @@ import { FakeShopifyGateway } from "../../src/adapters/shopify-fake/fake-shopify
 import { createInvoiceForOrder, recoverCreatingAttempt, type InvoiceDeps } from "../../src/application/create-invoice";
 import { FakeBtcpayGateway } from "../helpers/fake-btcpay";
 import { createTestDb } from "../helpers/test-db";
+import { addBitcoinOrder, TEST_SHOP } from "../helpers/orders";
 
 // invoice の作成（design.md 5.1）と CREATING の試行の回復（5.5 の 1）。DB は本物の SQLite、BTCPay と Shopify はフェイク。
 // 本物の BTCPay に対する競合（シナリオ7）とクラッシュ回復（シナリオ8）は統合テストで確かめる
@@ -28,22 +29,10 @@ describe("invoice の作成", () => {
   beforeEach(() => {
     btcpay = new FakeBtcpayGateway();
     shopify = new FakeShopifyGateway();
-    deps = { shop: "test-shop.myshopify.com", payments: new PrismaPaymentRepository(prisma), btcpay, shopify };
+    deps = { shop: TEST_SHOP, payments: new PrismaPaymentRepository(prisma), btcpay, shopify };
   });
 
-  function addOrder(overrides: Partial<Omit<ShopifyOrder, "shopifyOrderId">> = {}): string {
-    const shopifyOrderId = `gid://shopify/Order/${randomUUID()}`;
-    shopify.addOrder({
-      shopifyOrderId,
-      paymentGatewayNames: ["Bitcoinで支払う"],
-      financialStatus: "PENDING",
-      cancelled: false,
-      presentmentCurrencyCode: "JPY",
-      outstanding: { amount: "1000.0", currencyCode: "JPY" },
-      ...overrides,
-    });
-    return shopifyOrderId;
-  }
+  const addOrder = (overrides: Partial<Omit<ShopifyOrder, "shopifyOrderId">> = {}) => addBitcoinOrder(shopify, overrides);
 
   async function cancelOrder(shopifyOrderId: string): Promise<void> {
     const order = await shopify.getOrder(shopifyOrderId);
@@ -168,7 +157,7 @@ describe("invoice の作成", () => {
     it("BTCPay で作った後に紐づけ前で落ちた invoice は、作り直さずに紐づける", async () => {
       const shopifyOrderId = addOrder();
       // 紐づけの前に落ちたことにする: BTCPay には invoice があるが、DB は CREATING のまま
-      const reservation = await deps.payments.reserve({ paymentId: randomUUID(), attemptId: randomUUID(), shop: "test-shop.myshopify.com", shopifyOrderId });
+      const reservation = await deps.payments.reserve({ paymentId: randomUUID(), attemptId: randomUUID(), shop: TEST_SHOP, shopifyOrderId });
       const attemptId = reservation.payment.currentAttempt.id;
       const invoice = await btcpay.createInvoice({ attemptId, shopifyOrderId, amount: "1000.0", currency: "JPY" });
 

@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createInvoiceForOrder, reissueInvoice, type InvoiceDeps } from "../../src/application/create-invoice";
-import { mineBlocks, pay, paymentMethod, scaleBtc, waitFor } from "../helpers/regtest";
-import { startRegtestApp, TEST_SHOP, type RegtestApp } from "../helpers/regtest-app";
+import { greenfieldApi, mineBlocks, pay, paymentMethod, scaleBtc, waitFor } from "../helpers/regtest";
+import { TEST_SHOP } from "../helpers/orders";
+import { startRegtestApp, type RegtestApp } from "../helpers/regtest-app";
 import { ShortExpiryBtcpayGateway } from "../helpers/short-expiry-btcpay";
 
 // 異常系と再発行（design.md 4章・5.4・6章、ADR 9）。本物の BTCPay と bitcoind（regtest）、フェイクの Shopify。
@@ -169,9 +170,6 @@ describe.concurrent("異常系と再発行（regtest）", () => {
   }
 
   async function invoiceStatus(invoiceId: string): Promise<string> {
-    const response = await fetch(`${app.config.baseUrl}/api/v1/stores/${app.config.storeId}/invoices/${invoiceId}`, {
-      headers: { Authorization: `token ${app.config.apiKey}` },
-    });
-    return ((await response.json()) as { status: string }).status;
+    return (await greenfieldApi<{ status: string }>(app.config, "GET", `/invoices/${invoiceId}`)).status;
   }
 });

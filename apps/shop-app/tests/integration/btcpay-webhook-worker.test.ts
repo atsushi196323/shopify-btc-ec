@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createInvoiceForOrder } from "../../src/application/create-invoice";
-import { mineBlocks, pay, paymentMethod, waitFor } from "../helpers/regtest";
-import { startRegtestApp, TEST_SHOP, type RegtestApp } from "../helpers/regtest-app";
+import { greenfieldApi, mineBlocks, pay, paymentMethod, waitFor } from "../helpers/regtest";
+import { TEST_SHOP } from "../helpers/orders";
+import { startRegtestApp, type RegtestApp } from "../helpers/regtest-app";
 
 // bootstrap.sh が登録する Webhook の送信先
 const WEBHOOK_URL = "http://host.docker.internal:3000/webhooks/btcpay";
@@ -81,20 +82,10 @@ describe("BTCPay の Webhook とワーカー（regtest）", () => {
 
   // BTCPay の管理画面の「Redeliver」と同じ操作
   async function redeliver(deliveryId: string): Promise<void> {
-    const webhooks = await greenfieldApi<{ id: string; url: string }[]>("GET", "/webhooks");
+    const webhooks = await greenfieldApi<{ id: string; url: string }[]>(app.config, "GET", "/webhooks");
     const webhook = webhooks.find((w) => w.url === WEBHOOK_URL);
     if (!webhook) throw new Error(`${WEBHOOK_URL} の Webhook がない`);
-    await greenfieldApi("POST", `/webhooks/${webhook.id}/deliveries/${deliveryId}/redeliver`);
-  }
-
-  async function greenfieldApi<T>(method: string, path: string): Promise<T> {
-    const { config } = app;
-    const response = await fetch(`${config.baseUrl}/api/v1/stores/${config.storeId}${path}`, {
-      method,
-      headers: { Authorization: `token ${config.apiKey}` },
-    });
-    if (!response.ok) throw new Error(`${method} ${path}: ${response.status} ${await response.text()}`);
-    return (await response.json()) as T;
+    await greenfieldApi(app.config, "POST", `/webhooks/${webhook.id}/deliveries/${deliveryId}/redeliver`);
   }
 
   async function syncState(paymentId: string): Promise<string> {

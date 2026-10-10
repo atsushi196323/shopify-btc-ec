@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb } from "../../helpers/test-db";
+import { TEST_SHOP } from "../../helpers/orders";
 
 // ADR 7: Payment.currentAttemptId は、同じ Payment の試行しか指せない（複合外部キー）
 describe("Payment.currentAttemptId の複合外部キー", () => {
@@ -18,7 +19,7 @@ describe("Payment.currentAttemptId の複合外部キー", () => {
 
   it("ポインタが NULL の Payment は作れる", async () => {
     const payment = await prisma.payment.create({
-      data: { id: randomUUID(), shop: "test-shop.myshopify.com", shopifyOrderId: randomUUID() },
+      data: { id: randomUUID(), shop: TEST_SHOP, shopifyOrderId: randomUUID() },
     });
 
     expect(payment.currentAttemptId).toBeNull();
@@ -29,7 +30,7 @@ describe("Payment.currentAttemptId の複合外部キー", () => {
     const attemptId = randomUUID();
 
     await prisma.$transaction(async (tx) => {
-      await tx.payment.create({ data: { id: paymentId, shop: "test-shop.myshopify.com", shopifyOrderId: randomUUID() } });
+      await tx.payment.create({ data: { id: paymentId, shop: TEST_SHOP, shopifyOrderId: randomUUID() } });
       await tx.invoiceAttempt.create({ data: { id: attemptId, paymentId } });
       await tx.payment.update({ where: { id: paymentId }, data: { currentAttemptId: attemptId } });
     });
@@ -43,8 +44,8 @@ describe("Payment.currentAttemptId の複合外部キー", () => {
     const [pragma] = await prisma.$queryRaw<{ foreign_keys: bigint }[]>`PRAGMA foreign_keys`;
     expect(Number(pragma.foreign_keys)).toBe(1);
 
-    const paymentA = await prisma.payment.create({ data: { id: randomUUID(), shop: "test-shop.myshopify.com", shopifyOrderId: randomUUID() } });
-    const paymentB = await prisma.payment.create({ data: { id: randomUUID(), shop: "test-shop.myshopify.com", shopifyOrderId: randomUUID() } });
+    const paymentA = await prisma.payment.create({ data: { id: randomUUID(), shop: TEST_SHOP, shopifyOrderId: randomUUID() } });
+    const paymentB = await prisma.payment.create({ data: { id: randomUUID(), shop: TEST_SHOP, shopifyOrderId: randomUUID() } });
     const attemptOfB = await prisma.invoiceAttempt.create({ data: { id: randomUUID(), paymentId: paymentB.id } });
 
     const pointToOthersAttempt = prisma.payment.update({

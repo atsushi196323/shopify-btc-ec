@@ -56,11 +56,7 @@ export class GreenfieldClient implements BtcpayGateway {
   }
 
   async getInvoice(invoiceId: string): Promise<BtcpayInvoice> {
-    const invoice = await this.request<GreenfieldInvoice>(
-      "GET",
-      this.storePath(`/invoices/${encodeURIComponent(invoiceId)}`),
-    );
-    return this.toBtcpayInvoice(invoice);
+    return this.toBtcpayInvoice(await this.request<GreenfieldInvoice>("GET", this.invoicePath(invoiceId)));
   }
 
   async findInvoicesByAttemptId(attemptId: string): Promise<BtcpayInvoice[]> {
@@ -73,13 +69,12 @@ export class GreenfieldClient implements BtcpayGateway {
   }
 
   async invalidateInvoice(invoiceId: string): Promise<void> {
-    const path = this.storePath(`/invoices/${encodeURIComponent(invoiceId)}/status`);
     try {
-      await this.request("POST", path, { status: "Invalid" });
+      await this.request("POST", this.invoicePath(invoiceId, "/status"), { status: "Invalid" });
     } catch (error) {
       // すでに Invalid の invoice の無効化は 422 になる（regtest の BTCPay 2.4.4 で確認）。状態を確かめて、無効なら成功とみなす
       if (!(error instanceof BtcpayApiError && error.status === 422)) throw error;
-      const invoice = await this.request<GreenfieldInvoice>("GET", this.storePath(`/invoices/${encodeURIComponent(invoiceId)}`));
+      const invoice = await this.request<GreenfieldInvoice>("GET", this.invoicePath(invoiceId));
       if (invoice.status !== "Invalid") throw error;
     }
   }
@@ -102,10 +97,7 @@ export class GreenfieldClient implements BtcpayGateway {
 
   // 支払い方法はオンチェーンの BTC だけ（ADR 2）。Lightning を足すときは、支払い方法をまたいで合計する
   private async invalidInvoicePayment(invoiceId: string): Promise<InvalidInvoicePayment> {
-    const methods = await this.request<GreenfieldPaymentMethod[]>(
-      "GET",
-      this.storePath(`/invoices/${encodeURIComponent(invoiceId)}/payment-methods`),
-    );
+    const methods = await this.request<GreenfieldPaymentMethod[]>("GET", this.invoicePath(invoiceId, "/payment-methods"));
     const onchain = methods.find((method) => method.paymentMethodId === "BTC-CHAIN");
     if (!onchain) throw new Error(`invoice ${invoiceId} にオンチェーンの支払い方法がない`);
     return { totalPaid: onchain.totalPaid, amount: onchain.amount };
@@ -113,6 +105,10 @@ export class GreenfieldClient implements BtcpayGateway {
 
   private storePath(path: string): string {
     return `/api/v1/stores/${encodeURIComponent(this.config.storeId)}${path}`;
+  }
+
+  private invoicePath(invoiceId: string, suffix = ""): string {
+    return this.storePath(`/invoices/${encodeURIComponent(invoiceId)}${suffix}`);
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {

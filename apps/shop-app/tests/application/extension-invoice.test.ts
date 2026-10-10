@@ -9,6 +9,7 @@ import type { ShopifyOrder } from "../../src/application/ports/shopify-gateway";
 import type { InvoiceObservation } from "../../src/domain/payment";
 import { FakeBtcpayGateway } from "../helpers/fake-btcpay";
 import { createTestDb } from "../helpers/test-db";
+import { addBitcoinOrder, TEST_SHOP } from "../helpers/orders";
 
 // 拡張 API（design.md 5.2）。DB は本物の SQLite、BTCPay と Shopify はフェイク
 describe("拡張 API", () => {
@@ -29,27 +30,15 @@ describe("拡張 API", () => {
   beforeEach(() => {
     btcpay = new FakeBtcpayGateway();
     shopify = new FakeShopifyGateway();
-    deps = { shop: "test-shop.myshopify.com", payments: new PrismaPaymentRepository(prisma), btcpay, shopify };
+    deps = { shop: TEST_SHOP, payments: new PrismaPaymentRepository(prisma), btcpay, shopify };
   });
 
-  function addOrder(overrides: Partial<Omit<ShopifyOrder, "shopifyOrderId">> = {}): string {
-    const shopifyOrderId = `gid://shopify/Order/${randomUUID()}`;
-    shopify.addOrder({
-      shopifyOrderId,
-      paymentGatewayNames: ["Bitcoinで支払う"],
-      financialStatus: "PENDING",
-      cancelled: false,
-      presentmentCurrencyCode: "JPY",
-      outstanding: { amount: "1000.0", currencyCode: "JPY" },
-      ...overrides,
-    });
-    return shopifyOrderId;
-  }
+  const addOrder = (overrides: Partial<Omit<ShopifyOrder, "shopifyOrderId">> = {}) => addBitcoinOrder(shopify, overrides);
 
   // 予約だけして invoice を紐づけていない Payment（CREATING）を作る
   async function reserve(shopifyOrderId: string): Promise<string> {
     const attemptId = randomUUID();
-    await deps.payments.reserve({ paymentId: randomUUID(), attemptId, shop: "test-shop.myshopify.com", shopifyOrderId });
+    await deps.payments.reserve({ paymentId: randomUUID(), attemptId, shop: TEST_SHOP, shopifyOrderId });
     return attemptId;
   }
 

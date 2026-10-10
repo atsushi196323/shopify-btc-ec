@@ -9,9 +9,6 @@ import { invalidateAttempt, type InvalidateResult } from "./invalidate-attempt";
 import { MAX_CONFLICT_RETRIES } from "./retry-limits";
 import { syncPaymentToShopify, type ShopifySyncDeps, type ShopifySyncResult } from "./sync-to-shopify";
 
-// テストが参照する。値は retry-limits.ts にある
-export { MAX_CONFLICT_RETRIES };
-
 // inbox の1行を再処理する合計回数の上限。超えたら FAILED にして、人が気づけるようにする（design.md 5.3 の 3-5）
 export const MAX_INBOX_ATTEMPTS = 10;
 

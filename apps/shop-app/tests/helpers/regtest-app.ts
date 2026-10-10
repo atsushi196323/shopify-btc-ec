@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { PrismaClient } from "@prisma/client";
 import { loadWebhookSecret } from "../../src/adapters/btcpay/config";
@@ -6,11 +5,10 @@ import { GreenfieldClient, type GreenfieldConfig } from "../../src/adapters/btcp
 import { PrismaInboxRepository } from "../../src/adapters/db/prisma-inbox-repository";
 import { PrismaPaymentRepository } from "../../src/adapters/db/prisma-payment-repository";
 import { FakeShopifyGateway } from "../../src/adapters/shopify-fake/fake-shopify-gateway";
+import { addBitcoinOrder, TEST_SHOP } from "./orders";
 import { btcpayConfig } from "./regtest";
 import { createTestDb } from "./test-db";
 import { startWebhookServer, type WebhookServer } from "./webhook-server";
-
-export const TEST_SHOP = "test-shop.myshopify.com";
 
 // 統合テストのアプリ（ADR 10）。テストプロセスの中で、本物の BTCPay の Webhook を port 3000 で受け、
 // ルートと同じ処理（署名の検証 → inbox → ワーカー → 無効化・Shopify への反映）を流す。Shopify はフェイク
@@ -22,7 +20,7 @@ export type RegtestApp = {
   shopify: FakeShopifyGateway;
   server: WebhookServer;
   // 「Bitcoinで支払う」の支払い待ちの注文をフェイクの Shopify に足す
-  addOrder: (amount?: string) => string;
+  addOrder: () => string;
   close: () => Promise<void>;
 };
 
@@ -56,18 +54,7 @@ export async function startRegtestApp(): Promise<RegtestApp> {
     payments,
     shopify,
     server,
-    addOrder: (amount = "1000.0") => {
-      const shopifyOrderId = `gid://shopify/Order/${randomUUID()}`;
-      shopify.addOrder({
-        shopifyOrderId,
-        paymentGatewayNames: ["Bitcoinで支払う"],
-        financialStatus: "PENDING",
-        cancelled: false,
-        presentmentCurrencyCode: "JPY",
-        outstanding: { amount, currencyCode: "JPY" },
-      });
-      return shopifyOrderId;
-    },
+    addOrder: () => addBitcoinOrder(shopify),
     close: async () => {
       await server.close();
       await cleanup();

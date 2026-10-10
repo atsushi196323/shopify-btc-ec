@@ -87,12 +87,11 @@ export class AdminShopifyGateway implements ShopifyGateway {
   constructor(private readonly graphql: AdminGraphql) {}
 
   async getOrder(shopifyOrderId: string): Promise<ShopifyOrder | null> {
-    const response = await this.graphql(ORDER_FOR_INVOICE, { variables: { id: shopifyOrderId } });
-    const body = (await response.json()) as GraphqlResponse<OrderForInvoiceQuery>;
-    if (body.errors || !body.data) {
-      throw new Error(`Shopify の注文 ${shopifyOrderId} を取得できない: ${JSON.stringify(body.errors)}`);
-    }
-    const order = body.data.order;
+    const { order } = await this.run<OrderForInvoiceQuery>(
+      `Shopify の注文 ${shopifyOrderId} を取得できない`,
+      ORDER_FOR_INVOICE,
+      { id: shopifyOrderId },
+    );
     if (!order) return null;
     return {
       shopifyOrderId: order.id,
@@ -108,19 +107,22 @@ export class AdminShopifyGateway implements ShopifyGateway {
   }
 
   async markOrderAsPaid(shopifyOrderId: string): Promise<void> {
-    const data = await this.mutate<OrderMarkAsPaidMutation>(ORDER_MARK_AS_PAID, { input: { id: shopifyOrderId } });
-    assertNoUserErrors(`注文 ${shopifyOrderId} を支払い済みにできない`, data.orderMarkAsPaid);
+    const context = `注文 ${shopifyOrderId} を支払い済みにできない`;
+    const data = await this.run<OrderMarkAsPaidMutation>(context, ORDER_MARK_AS_PAID, { input: { id: shopifyOrderId } });
+    assertNoUserErrors(context, data.orderMarkAsPaid);
   }
 
   async addOrderTags(shopifyOrderId: string, tags: string[]): Promise<void> {
-    const data = await this.mutate<TagsAddMutation>(TAGS_ADD, { id: shopifyOrderId, tags });
-    assertNoUserErrors(`注文 ${shopifyOrderId} にタグを付けられない`, data.tagsAdd);
+    const context = `注文 ${shopifyOrderId} にタグを付けられない`;
+    const data = await this.run<TagsAddMutation>(context, TAGS_ADD, { id: shopifyOrderId, tags });
+    assertNoUserErrors(context, data.tagsAdd);
   }
 
-  private async mutate<T>(mutation: string, variables: Record<string, unknown>): Promise<T> {
-    const response = await this.graphql(mutation, { variables });
+  // GraphQL のエラー（権限・構文など）は、context を添えて例外にする
+  private async run<T>(context: string, document: string, variables: Record<string, unknown>): Promise<T> {
+    const response = await this.graphql(document, { variables });
     const body = (await response.json()) as GraphqlResponse<T>;
-    if (body.errors || !body.data) throw new Error(`Shopify の更新に失敗した: ${JSON.stringify(body.errors)}`);
+    if (body.errors || !body.data) throw new Error(`${context}: ${JSON.stringify(body.errors)}`);
     return body.data;
   }
 }
