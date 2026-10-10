@@ -78,14 +78,16 @@ Greenfield の `POST /invoices/{id}/status`（`Invalid`）で無効化した inv
   BTCPay を先に呼ぶと、無効化の直後に届いた入金を、まだ `invalidatedByUs` でない試行への入金（INVALID_PAYMENT）と判定しうる。
   BTCPay の呼び出しが失敗しても `invalidatedByUs` は残り、試行は NEW のままなので、スイープ（W4）が「UNRESOLVED なのに現在の試行が NEW」として呼び直す。
 - 無効化する試行かどうかは、ドメインの `attemptToInvalidate` で判定する。ワーカーは保存の commit の直後に、無効化 → Shopify への反映の順に呼ぶ。
-  invoice の紐づけ（初回の作成・再発行・孤児の回復）の後にも呼ぶ。再発行の作成中（新しい試行が CREATING）に古い試行へ期限後の入金があると、
+  invoice の紐づけ（初回の作成・再発行・孤児の回復）の後にも、紐づけのドメインの判定が無効化を求めたときだけ呼ぶ。再発行の作成中（新しい試行が CREATING）に古い試行へ期限後の入金があると、
   Payment は先に UNRESOLVED になり、紐づけた時点で初めて「UNRESOLVED なのに現在の試行が NEW」になるため。
 - すでに Invalid の invoice の無効化は 422 になる（regtest の BTCPay 2.4.4 で確認）。アダプタは 422 のとき invoice を取り直し、Invalid なら成功とみなす（冪等）。
 - **検知方法の実装**: アダプタは無効化した invoice（`Invalid` / `Marked`）を取得するときに `payment-methods` も取得し、オンチェーン（`BTC-CHAIN`）の `totalPaid` と `amount` から `received` を決める。
   BTCPay が二重支払いなどで Invalid にした invoice（`additionalStatus` が `Marked` 以外）は、これまでどおり `additionalStatus` で判定する。
   金額の比較は10進数の文字列のまま行う（浮動小数点に変換しない）。
 - **再発行**（`reissueInvoice`、design.md 5.4）: Payment が EXPIRED のときだけ受け付ける。
-  - 先に Admin API で注文を確かめ、請求額を取り直す（ADR 4）。invoice を作れない注文（キャンセル済みなど）では、新しい試行を作らない。
+  - Payment のショップがセッションのショップと違えば、Payment がないものとして断る（拡張から届いた注文 ID は信用しない。ADR 4）。
+    EXPIRED のときだけ Admin API で注文を確かめ、請求額を取り直す。invoice を作れない注文（キャンセル済みなど）では、新しい試行を作らない。
+  - 保存するのはドメインの `reissue()` の結果（新しい試行・ポインタ・status）。リポジトリで遷移を組み立て直さない。
   - 新しい試行の作成・ポインタの付け替え・Payment の CREATING を、version 付きの1つのトランザクションで行う。並列に押されても、勝つのは1つだけ。
   - commit の後に BTCPay に invoice を作って紐づける（初回の作成と同じ処理）。途中で落ちて CREATING のまま残った試行は、スイープの孤児回復が追いつかせる。
   - 拡張: `POST /api/extension/reissue`。期限切れの表示に「お支払いリンクを再発行する」ボタンを出し、応答の表示状態で問い合わせを始め直す。

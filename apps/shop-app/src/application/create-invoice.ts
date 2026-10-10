@@ -99,9 +99,10 @@ export type ReissueInvoiceResult =
 // 1つのトランザクションで新しい試行を作ってポインタを付け替え、commit の後に BTCPay を呼ぶ（5.1 の 4 以降と同じ）。
 // BTCPay の呼び出しや紐づけで例外が出たら、新しい試行は CREATING のまま残り、スイープの孤児回復が追いつかせる
 export async function reissueInvoice(deps: InvoiceDeps, shopifyOrderId: string): Promise<ReissueInvoiceResult> {
-  const existing = await deps.payments.findByShopifyOrderId(shopifyOrderId);
-  if (!existing) return { outcome: "PAYMENT_NOT_FOUND" };
-  if (existing.status !== "EXPIRED") return { outcome: "NOT_EXPIRED", payment: existing };
+  let current = await deps.payments.findByShopifyOrderId(shopifyOrderId);
+  // 別のショップの Payment は、ないものとして扱う（拡張から届いた shopifyOrderId は信用しない。ADR 4）
+  if (!current || current.shop !== deps.shop) return { outcome: "PAYMENT_NOT_FOUND" };
+  if (current.status !== "EXPIRED") return { outcome: "NOT_EXPIRED", payment: current };
 
   // 請求額は取り直す。レートは BTCPay が invoice を作るときに取り直す（ADR 9）
   const order = await fetchPayableOrder(deps, shopifyOrderId);
@@ -109,19 +110,27 @@ export async function reissueInvoice(deps: InvoiceDeps, shopifyOrderId: string):
 
   const newId = deps.newId ?? randomUUID;
   for (let i = 0; i < MAX_CONFLICT_RETRIES; i++) {
-    const current = await deps.payments.findByShopifyOrderId(shopifyOrderId);
-    if (!current) throw new Error(`注文 ${shopifyOrderId} の Payment が消えた`);
     const loaded = await deps.payments.loadForAttempt(current.currentAttempt.id);
     if (!loaded) throw new Error(`試行 ${current.currentAttempt.id} がない`);
     const newAttemptId = newId();
-    if (!reissue(loaded.state, newAttemptId).ok) return { outcome: "NOT_EXPIRED", payment: current };
+    const reissued = reissue(loaded.state, newAttemptId);
+    // 注文を確かめている間に、別の再発行や期限後の入金で EXPIRED でなくなった。今の Payment を読み直して返す
+    if (!reissued.ok) {
+      const latest = await deps.payments.findByShopifyOrderId(shopifyOrderId);
+      if (!latest) throw new Error(`注文 ${shopifyOrderId} の Payment が消えた`);
+      return { outcome: "NOT_EXPIRED", payment: latest };
+    }
 
     const saved = await deps.payments.saveReissue({
       paymentId: loaded.paymentId,
       expectedVersion: loaded.version,
-      newAttemptId,
+      state: reissued.state,
     });
-    if (!saved.saved) continue;
+    if (!saved.saved) {
+      // 読んだ後に別の処理が更新した。保存しなかった側が返す今の Payment で判定し直す
+      current = saved.payment;
+      continue;
+    }
 
     const invoice = await deps.btcpay.createInvoice({ attemptId: newAttemptId, shopifyOrderId, ...order.amount });
     const attached = await attach(deps, newAttemptId, invoice);
@@ -160,8 +169,8 @@ async function attach(deps: InvoiceDeps, attemptId: string, invoice: BtcpayInvoi
     decide: (state) => applyObservation(state, attemptId, invoice.observation),
   });
   // 作成中（CREATING）に古い試行へ期限後の入金があり、Payment が先に UNRESOLVED になっていた場合、紐づけた invoice は無効化する。
-  // 無効化する試行でなければ何もしない。失敗しても invalidatedByUs は残り、スイープが呼び直す（ADR 9）
-  if (attached.attached) {
+  // 失敗しても invalidatedByUs は残り、スイープが呼び直す（ADR 9）
+  if (attached.attemptToInvalidate === attemptId) {
     await invalidateAttempt(deps, attemptId).catch((error: unknown) => {
       console.error(`試行 ${attemptId} の無効化に失敗した`, error);
     });

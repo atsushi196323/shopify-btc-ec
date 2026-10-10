@@ -65,3 +65,10 @@ Thank you ページの拡張から、アプリの API（`POST /invoice {shopifyO
   手動の E2E（2026-10-08）で、実際には OrderIdentity の GID で届くことを確かめた（ADR 1）。
 - テスト: `tests/application/extension-invoice.test.ts`（DB は本物の SQLite、BTCPay と Shopify はフェイク）、`tests/adapter/shopify/extension-request.test.ts`。
   ルートとセッショントークンの検証は、拡張の UI をつないだ後の手動の E2E で確かめる。
+
+## W3 で変えたこと（2026-10-10、ショップの確かめ方）
+- W3 で Payment にショップの列（`shop`）を足した（ADR 8）。拡張 API と再発行は、**Payment があれば、そのショップがセッションのショップと同じかを比べて**確かめる。
+  違えば状態を返さず `PREPARING` にする（注文が見えないときと同じ）。上の「Payment を読む前に必ず注文を取り直す」は、この比較に置き換えた。
+  拡張は問い合わせを繰り返すので、そのたびに Admin API を呼ばずに済む。
+- Payment がなければ、これまでどおり、作成の中でセッションのショップの Admin API で注文を取り直す（見えなければ作らない）。
+- ショップは保存と比較の前に表記をそろえる（小文字にし、`https://` と末尾の `/` を除く。`src/adapters/shopify/shop-domain.ts`）。

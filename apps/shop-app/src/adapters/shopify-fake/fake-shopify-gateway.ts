@@ -23,6 +23,10 @@ export class FakeShopifyGateway implements ShopifyGateway {
     if (!order) throw new Error(`注文 ${shopifyOrderId} がない`);
     this.markedAsPaid.push(shopifyOrderId);
     if (order.financialStatus === "PAID") throw new Error(`注文 ${shopifyOrderId} はすでに支払い済み`);
+    // キャンセル済み・返金済みなどの注文は、本物と同じく支払い済みにできない
+    if (order.cancelled || !["PENDING", "PARTIALLY_PAID"].includes(order.financialStatus)) {
+      throw new Error(`注文 ${shopifyOrderId} は支払い済みにできない（${order.financialStatus}）`);
+    }
     order.financialStatus = "PAID";
   }
 

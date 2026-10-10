@@ -82,15 +82,22 @@ describe("拡張 API", () => {
     expect(second).toEqual(first);
   });
 
-  it("Admin API で注文が見えなければ、Payment を見ずに PREPARING を返す", async () => {
-    // 別のショップの注文も、このショップの Admin API では見えないのでここに来る
+  it("Payment がなく、Admin API で注文も見えなければ、何も作らずに PREPARING を返す", async () => {
     const shopifyOrderId = `gid://shopify/Order/${randomUUID()}`;
-    await reserve(shopifyOrderId);
 
     const view = await invoiceForExtension(deps, shopifyOrderId);
 
     expect(view).toEqual({ state: "PREPARING" });
     expect(btcpay.created).toHaveLength(0);
+    expect(await deps.payments.findByShopifyOrderId(shopifyOrderId)).toBeNull();
+  });
+
+  it("別のショップの Payment には、状態を返さずに PREPARING を返す", async () => {
+    const shopifyOrderId = await paymentObserving({ status: "SETTLED", received: "FULL" });
+
+    expect(await invoiceForExtension({ ...deps, shop: "other-shop.myshopify.com" }, shopifyOrderId)).toEqual({
+      state: "PREPARING",
+    });
   });
 
   it("invoice を作れない注文には、何も作らずに NOT_APPLICABLE を返す", async () => {
