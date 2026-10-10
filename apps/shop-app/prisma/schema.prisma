@@ -83,6 +83,8 @@ enum InboxStatus {
 // (currentAttemptId, id) → InvoiceAttempt(id, paymentId) の複合外部キーで、別の Payment の試行を指せないようにする。
 model Payment {
   id               String        @id
+  // 注文のショップ（xxx.myshopify.com）。ワーカーとスイープが Shopify に反映するときに、このショップのオフラインセッションを使う
+  shop             String
   shopifyOrderId   String        @unique
   status           PaymentStatus @default(CREATING)
   // 楽観ロック用。状態・フラグ・ポインタ・試行を変えるたびに +1 する（試行を含める理由は ADR 6 の直列化）

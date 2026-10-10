@@ -14,7 +14,7 @@ export type ExtensionView = { state: StateOnly } | { state: "AWAITING_PAYMENT"; 
 
 export async function invoiceForExtension(deps: InvoiceDeps, shopifyOrderId: string): Promise<ExtensionView> {
   // 拡張から届いた shopifyOrderId は信用しない。セッショントークンのショップの Admin API で取れる注文だけを扱う。
-  // Payment にはショップの列がないので、ここで確かめないと別のショップの注文の状態を返しうる
+  // ここで確かめないと、別のショップの注文の状態を返しうる
   const order = await deps.shopify.getOrder(shopifyOrderId);
   // Thank you ページの表示は注文の作成と同時なので、Admin API でまだ見えないことがある。待ってから問い合わせ直してもらう
   if (!order) return { state: "PREPARING" };

@@ -31,7 +31,7 @@ describe("シナリオ7: invoice 作成の競合（regtest）", () => {
   it("Webhook と拡張から10並列ずつ作成しても、Payment と BTCPay の invoice はどちらも1件", async () => {
     const shopify = new FakeShopifyGateway();
     const btcpay = new InjectingBtcpayGateway(new GreenfieldClient(config));
-    const deps: InvoiceDeps = { payments: new PrismaPaymentRepository(prisma), btcpay, shopify };
+    const deps: InvoiceDeps = { shop: "test-shop.myshopify.com", payments: new PrismaPaymentRepository(prisma), btcpay, shopify };
     const shopifyOrderId = `gid://shopify/Order/${randomUUID()}`;
     shopify.addOrder({
       shopifyOrderId,

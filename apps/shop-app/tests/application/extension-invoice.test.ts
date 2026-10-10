@@ -29,7 +29,7 @@ describe("拡張 API", () => {
   beforeEach(() => {
     btcpay = new FakeBtcpayGateway();
     shopify = new FakeShopifyGateway();
-    deps = { payments: new PrismaPaymentRepository(prisma), btcpay, shopify };
+    deps = { shop: "test-shop.myshopify.com", payments: new PrismaPaymentRepository(prisma), btcpay, shopify };
   });
 
   function addOrder(overrides: Partial<Omit<ShopifyOrder, "shopifyOrderId">> = {}): string {
@@ -49,7 +49,7 @@ describe("拡張 API", () => {
   // 予約だけして invoice を紐づけていない Payment（CREATING）を作る
   async function reserve(shopifyOrderId: string): Promise<string> {
     const attemptId = randomUUID();
-    await deps.payments.reserve({ paymentId: randomUUID(), attemptId, shopifyOrderId });
+    await deps.payments.reserve({ paymentId: randomUUID(), attemptId, shop: "test-shop.myshopify.com", shopifyOrderId });
     return attemptId;
   }
 

@@ -14,7 +14,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!admin) return new Response();
 
   const shopifyOrderId = shopifyOrderIdFromWebhook(payload);
-  const result = await createInvoiceForOrder(invoiceDeps(admin), shopifyOrderId);
+  const result = await createInvoiceForOrder(invoiceDeps(shop, admin), shopifyOrderId);
   console.log(
     `orders/create ${shop} ${shopifyOrderId}: ${result.outcome}${result.outcome === "NOT_ELIGIBLE" ? ` (${result.reason})` : ""}`,
   );

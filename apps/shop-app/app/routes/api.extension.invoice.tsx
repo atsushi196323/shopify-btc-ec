@@ -17,7 +17,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     // dest はトークンを発行したショップ。そのショップのオフラインセッションで Admin API を呼ぶ
     const { admin } = await unauthenticated.admin(sessionToken.dest);
-    const view = await invoiceForExtension(invoiceDeps(admin), shopifyOrderId);
+    const view = await invoiceForExtension(invoiceDeps(sessionToken.dest, admin), shopifyOrderId);
     return cors(Response.json(view));
   } catch (error) {
     // BTCPay・Shopify の一時的な失敗。拡張は時間をおいて問い合わせ直す

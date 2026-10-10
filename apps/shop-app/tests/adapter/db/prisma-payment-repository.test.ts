@@ -21,7 +21,7 @@ describe("PrismaPaymentRepository", () => {
   });
 
   const reserve = (shopifyOrderId = randomUUID()) =>
-    repository.reserve({ paymentId: randomUUID(), attemptId: randomUUID(), shopifyOrderId });
+    repository.reserve({ paymentId: randomUUID(), attemptId: randomUUID(), shop: "test-shop.myshopify.com", shopifyOrderId });
 
   const attach = (attemptId: string, observation: InvoiceObservation = { status: "NEW", received: "NONE" }) =>
     repository.attachInvoice({
@@ -36,7 +36,7 @@ describe("PrismaPaymentRepository", () => {
       const paymentId = randomUUID();
       const attemptId = randomUUID();
 
-      const result = await repository.reserve({ paymentId, attemptId, shopifyOrderId });
+      const result = await repository.reserve({ paymentId, attemptId, shop: "test-shop.myshopify.com", shopifyOrderId });
 
       expect(result).toEqual({
         reserved: true,
@@ -49,7 +49,7 @@ describe("PrismaPaymentRepository", () => {
         },
       });
       const row = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
-      expect(row).toMatchObject({ currentAttemptId: attemptId, shopifySync: "DONE" });
+      expect(row).toMatchObject({ shop: "test-shop.myshopify.com", currentAttemptId: attemptId, shopifySync: "DONE" });
     });
 
     it("同じ shopifyOrderId では負け、既存の Payment を返す。負けた側の行は残らない", async () => {
@@ -59,6 +59,7 @@ describe("PrismaPaymentRepository", () => {
       const second = await repository.reserve({
         paymentId: randomUUID(),
         attemptId: loserAttemptId,
+        shop: "test-shop.myshopify.com",
         shopifyOrderId: first.payment.shopifyOrderId,
       });
 
@@ -264,6 +265,71 @@ describe("PrismaPaymentRepository", () => {
         btcpayInvoiceId: null,
       });
       expect(await repository.findAttempt(randomUUID())).toBeNull();
+    });
+  });
+
+  describe("Shopify への反映（loadForSync・markSynced・recordSyncError）", () => {
+    // 紐づけ済み（AWAITING_PAYMENT・version 1）の Payment。紐づけで status が変わるので shopifySync は PENDING
+    async function pendingSync() {
+      const { payment } = await reserve();
+      await attach(payment.currentAttempt.id);
+      return { paymentId: payment.paymentId, attemptId: payment.currentAttempt.id, shopifyOrderId: payment.shopifyOrderId };
+    }
+
+    it("ショップ・状態・version と、未対応のフラグの理由だけを返す。なければ null", async () => {
+      const { paymentId, attemptId, shopifyOrderId } = await pendingSync();
+      await prisma.reviewFlag.createMany({
+        data: [
+          { id: randomUUID(), paymentId, attemptId, reason: "OVERPAID" },
+          { id: randomUUID(), paymentId, attemptId, reason: "UNDERPAID", resolvedAt: new Date() },
+        ],
+      });
+
+      expect(await repository.loadForSync(paymentId)).toEqual({
+        paymentId,
+        shop: "test-shop.myshopify.com",
+        shopifyOrderId,
+        status: "AWAITING_PAYMENT",
+        version: 1,
+        shopifySync: "PENDING",
+        unresolvedReasons: ["OVERPAID"],
+      });
+      expect(await repository.loadForSync(randomUUID())).toBeNull();
+    });
+
+    it("読んだ version のままなら DONE にし、記録した失敗を消す", async () => {
+      const { paymentId } = await pendingSync();
+      await repository.recordSyncError(paymentId, "一時的な失敗");
+      expect(await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } })).toMatchObject({
+        shopifySync: "PENDING",
+        shopifySyncError: "一時的な失敗",
+      });
+
+      expect(await repository.markSynced(paymentId, 1)).toBe(true);
+      expect(await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } })).toMatchObject({
+        shopifySync: "DONE",
+        shopifySyncError: null,
+        version: 1,
+      });
+    });
+
+    it("反映中に version が変わっていたら、PENDING のまま残す", async () => {
+      const { paymentId } = await pendingSync();
+      await prisma.payment.update({ where: { id: paymentId }, data: { version: { increment: 1 } } });
+
+      expect(await repository.markSynced(paymentId, 1)).toBe(false);
+      expect(await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } })).toMatchObject({ shopifySync: "PENDING" });
+    });
+
+    it("すでに DONE なら、失敗を記録しない", async () => {
+      const { paymentId } = await pendingSync();
+      await repository.markSynced(paymentId, 1);
+
+      await repository.recordSyncError(paymentId, "遅れて届いた失敗");
+      expect(await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } })).toMatchObject({
+        shopifySync: "DONE",
+        shopifySyncError: null,
+      });
     });
   });
 });

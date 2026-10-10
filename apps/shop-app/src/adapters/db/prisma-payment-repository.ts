@@ -6,6 +6,7 @@ import type {
   AttachInvoiceResult,
   AttemptSnapshot,
   PaymentForAttempt,
+  PaymentForSync,
   PaymentRepository,
   PaymentSnapshot,
   ReserveInput,
@@ -43,10 +44,10 @@ export class PrismaPaymentRepository implements PaymentRepository {
     };
   }
 
-  async reserve({ paymentId, attemptId, shopifyOrderId }: ReserveInput): Promise<ReserveResult> {
+  async reserve({ paymentId, attemptId, shop, shopifyOrderId }: ReserveInput): Promise<ReserveResult> {
     try {
       const payment = await this.prisma.$transaction(async (tx) => {
-        await tx.payment.create({ data: { id: paymentId, shopifyOrderId } });
+        await tx.payment.create({ data: { id: paymentId, shop, shopifyOrderId } });
         await tx.invoiceAttempt.create({ data: { id: attemptId, paymentId } });
         return tx.payment.update({
           where: { id: paymentId },
@@ -150,6 +151,39 @@ export class PrismaPaymentRepository implements PaymentRepository {
       if (error instanceof VersionConflict) return { saved: false };
       throw error;
     }
+  }
+
+  async loadForSync(paymentId: string): Promise<PaymentForSync | null> {
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: { reviewFlags: { where: { resolvedAt: null } } },
+    });
+    if (!payment) return null;
+    return {
+      paymentId: payment.id,
+      shop: payment.shop,
+      shopifyOrderId: payment.shopifyOrderId,
+      status: payment.status,
+      version: payment.version,
+      shopifySync: payment.shopifySync,
+      unresolvedReasons: [...new Set(payment.reviewFlags.map((flag) => flag.reason))],
+    };
+  }
+
+  async markSynced(paymentId: string, version: number): Promise<boolean> {
+    const updated = await this.prisma.payment.updateMany({
+      where: { id: paymentId, version, shopifySync: "PENDING" },
+      data: { shopifySync: "DONE", shopifySyncError: null },
+    });
+    return updated.count === 1;
+  }
+
+  // version は条件にしない。反映中に別の変更が入っていても、失敗の内容は次の反映で DONE になるまで残しておく
+  async recordSyncError(paymentId: string, error: string): Promise<void> {
+    await this.prisma.payment.updateMany({
+      where: { id: paymentId, shopifySync: "PENDING" },
+      data: { shopifySyncError: error },
+    });
   }
 }
 
