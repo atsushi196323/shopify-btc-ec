@@ -81,6 +81,7 @@ describe("processBtcpayEvent", () => {
       getInvoice,
       createInvoice: (input) => btcpay.createInvoice(input),
       findInvoicesByAttemptId: (attemptId) => btcpay.findInvoicesByAttemptId(attemptId),
+      invalidateInvoice: (invoiceId) => btcpay.invalidateInvoice(invoiceId),
     };
   }
 

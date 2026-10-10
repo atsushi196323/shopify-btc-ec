@@ -1,8 +1,10 @@
 // invoice の作成（design.md 5.1、ADR 5）と、CREATING のまま残った試行の回復（design.md 5.5 の 1）。
 // 予約行で同時実行を排除し、BTCPay の呼び出しは予約の commit の後に行う。
 import { randomUUID } from "node:crypto";
-import { applyObservation } from "../domain/payment";
+import { applyObservation, reissue } from "../domain/payment";
+import { invalidateAttempt } from "./invalidate-attempt";
 import { checkOrderEligibility, type IneligibleReason } from "./order-eligibility";
+import { MAX_CONFLICT_RETRIES } from "./retry-limits";
 import type { BtcpayGateway, BtcpayInvoice } from "./ports/btcpay-gateway";
 import type { AttemptSnapshot, PaymentRepository, PaymentSnapshot } from "./ports/payment-repository";
 import type { ShopifyGateway } from "./ports/shopify-gateway";
@@ -84,6 +86,53 @@ export async function recoverCreatingAttempt(deps: InvoiceDeps, attemptId: strin
   return attached.attached ? { outcome: "RECREATED", payment: attached.payment } : { outcome: "ALREADY_ATTACHED" };
 }
 
+// REISSUED: 新しい試行を作り、BTCPay に invoice を作った
+// NOT_EXPIRED: Payment が EXPIRED でなかった（再発行済み・入金があったなど）。今の Payment を返す
+// PAYMENT_NOT_FOUND: この注文の Payment がない
+export type ReissueInvoiceResult =
+  | { outcome: "REISSUED"; payment: PaymentSnapshot; invoice: BtcpayInvoice }
+  | { outcome: "NOT_EXPIRED"; payment: PaymentSnapshot }
+  | { outcome: "PAYMENT_NOT_FOUND" }
+  | OrderRejection;
+
+// 再発行（design.md 5.4）。起点は拡張の「invoice を再発行」ボタンで、Payment が EXPIRED のときだけ受け付ける。
+// 1つのトランザクションで新しい試行を作ってポインタを付け替え、commit の後に BTCPay を呼ぶ（5.1 の 4 以降と同じ）。
+// BTCPay の呼び出しや紐づけで例外が出たら、新しい試行は CREATING のまま残り、スイープの孤児回復が追いつかせる
+export async function reissueInvoice(deps: InvoiceDeps, shopifyOrderId: string): Promise<ReissueInvoiceResult> {
+  const existing = await deps.payments.findByShopifyOrderId(shopifyOrderId);
+  if (!existing) return { outcome: "PAYMENT_NOT_FOUND" };
+  if (existing.status !== "EXPIRED") return { outcome: "NOT_EXPIRED", payment: existing };
+
+  // 請求額は取り直す。レートは BTCPay が invoice を作るときに取り直す（ADR 9）
+  const order = await fetchPayableOrder(deps, shopifyOrderId);
+  if (!order.payable) return order.rejection;
+
+  const newId = deps.newId ?? randomUUID;
+  for (let i = 0; i < MAX_CONFLICT_RETRIES; i++) {
+    const current = await deps.payments.findByShopifyOrderId(shopifyOrderId);
+    if (!current) throw new Error(`注文 ${shopifyOrderId} の Payment が消えた`);
+    const loaded = await deps.payments.loadForAttempt(current.currentAttempt.id);
+    if (!loaded) throw new Error(`試行 ${current.currentAttempt.id} がない`);
+    const newAttemptId = newId();
+    if (!reissue(loaded.state, newAttemptId).ok) return { outcome: "NOT_EXPIRED", payment: current };
+
+    const saved = await deps.payments.saveReissue({
+      paymentId: loaded.paymentId,
+      expectedVersion: loaded.version,
+      newAttemptId,
+    });
+    if (!saved.saved) continue;
+
+    const invoice = await deps.btcpay.createInvoice({ attemptId: newAttemptId, shopifyOrderId, ...order.amount });
+    const attached = await attach(deps, newAttemptId, invoice);
+    // 紐づけに負けたのは、この呼び出しが遅れている間にスイープが回復した場合。勝った側の invoice を正とする
+    return attached.attached
+      ? { outcome: "REISSUED", payment: attached.payment, invoice }
+      : { outcome: "NOT_EXPIRED", payment: attached.payment };
+  }
+  throw new Error(`version の競合が ${MAX_CONFLICT_RETRIES} 回続いた`);
+}
+
 type PayableOrder =
   | { payable: true; amount: { amount: string; currency: string } }
   | { payable: false; rejection: OrderRejection };
@@ -104,10 +153,18 @@ function isUnattached(attempt: AttemptSnapshot): boolean {
 }
 
 // 回復で見つかった invoice は NEW とは限らない（すでに入金・期限切れのこともある）ので、遷移とフラグはドメインで判定する
-function attach(deps: InvoiceDeps, attemptId: string, invoice: BtcpayInvoice) {
-  return deps.payments.attachInvoice({
+async function attach(deps: InvoiceDeps, attemptId: string, invoice: BtcpayInvoice) {
+  const attached = await deps.payments.attachInvoice({
     attemptId,
     btcpayInvoiceId: invoice.invoiceId,
     decide: (state) => applyObservation(state, attemptId, invoice.observation),
   });
+  // 作成中（CREATING）に古い試行へ期限後の入金があり、Payment が先に UNRESOLVED になっていた場合、紐づけた invoice は無効化する。
+  // 無効化する試行でなければ何もしない。失敗しても invalidatedByUs は残り、スイープが呼び直す（ADR 9）
+  if (attached.attached) {
+    await invalidateAttempt(deps, attemptId).catch((error: unknown) => {
+      console.error(`試行 ${attemptId} の無効化に失敗した`, error);
+    });
+  }
+  return attached;
 }

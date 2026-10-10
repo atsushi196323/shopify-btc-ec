@@ -5,6 +5,7 @@ import type {
   AttachInvoiceInput,
   AttachInvoiceResult,
   AttemptSnapshot,
+  MarkInvalidatedInput,
   PaymentForAttempt,
   PaymentForSync,
   PaymentRepository,
@@ -12,6 +13,7 @@ import type {
   ReserveInput,
   ReserveResult,
   SaveObservationInput,
+  SaveReissueInput,
 } from "../../application/ports/payment-repository";
 import type { PaymentState } from "../../domain/payment";
 import { TRANSACTION_OPTIONS } from "./sqlite";
@@ -151,6 +153,41 @@ export class PrismaPaymentRepository implements PaymentRepository {
       if (error instanceof VersionConflict) return { saved: false };
       throw error;
     }
+  }
+
+  async markInvalidatedByUs({ paymentId, expectedVersion, attemptId }: MarkInvalidatedInput): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      // 最初に書き込んでロックを取る（attachInvoice と同じ理由）。invalidatedByUs は判定（ADR 6）に効くので version を上げる
+      const updated = await tx.payment.updateMany({
+        where: { id: paymentId, version: expectedVersion },
+        data: { version: { increment: 1 } },
+      });
+      if (updated.count === 0) return false;
+      await tx.invoiceAttempt.update({
+        where: { id: attemptId, paymentId },
+        data: { invalidatedByUs: true, invalidatedAt: new Date() },
+      });
+      return true;
+    }, TRANSACTION_OPTIONS);
+  }
+
+  async saveReissue({ paymentId, expectedVersion, newAttemptId }: SaveReissueInput) {
+    return this.prisma.$transaction(async (tx) => {
+      // 最初に書き込んでロックを取る。試行の作成とポインタの付け替えは、同じトランザクションで行う（ADR 7）。
+      // status が変わるので、ほかの遷移と同じく Shopify への反映待ちにする（design.md 4章「Shopify への反映」の1）
+      const updated = await tx.payment.updateMany({
+        where: { id: paymentId, version: expectedVersion },
+        data: { status: "CREATING", version: { increment: 1 }, shopifySync: "PENDING" },
+      });
+      if (updated.count === 0) return { saved: false, payment: toSnapshot(await findPayment(tx, paymentId)) };
+      await tx.invoiceAttempt.create({ data: { id: newAttemptId, paymentId } });
+      const payment = await tx.payment.update({
+        where: { id: paymentId },
+        data: { currentAttemptId: newAttemptId },
+        include: withCurrentAttempt,
+      });
+      return { saved: true, payment: toSnapshot(payment) };
+    }, TRANSACTION_OPTIONS);
   }
 
   async loadForSync(paymentId: string): Promise<PaymentForSync | null> {

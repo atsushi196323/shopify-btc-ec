@@ -1,13 +1,13 @@
 // 拡張 API（design.md 5.2、ADR 4）。Thank you ページの拡張に、checkout link と表示用の状態だけを返す。
 // Payment がまだなければ、ここで invoice を作る（遅延作成。design.md 5.1 の起点の2つめ）。
 import type { PaymentStatus } from "../domain/payment";
-import { createInvoiceForOrder, type InvoiceDeps } from "./create-invoice";
+import { createInvoiceForOrder, reissueInvoice, type InvoiceDeps } from "./create-invoice";
 import type { PaymentSnapshot } from "./ports/payment-repository";
 
 // 拡張に返す表示状態。ADR 4 のとおり、金額・試行・フラグの中身は返さない
 // PREPARING: invoice の作成中、または注文がまだ Admin API で見えない。拡張は時間をおいて問い合わせ直す
 // AWAITING_PAYMENT: 支払い待ち / CONFIRMING: 入金確認中 / PAID: 支払い済み
-// EXPIRED: 期限切れ（再発行できる。再発行は W3） / CONTACT_SHOP: ショップから連絡します
+// EXPIRED: 期限切れ（拡張から再発行できる） / CONTACT_SHOP: ショップから連絡します
 // NOT_APPLICABLE: invoice を作らない注文（Bitcoin 以外の支払い方法・キャンセル済みなど）。拡張は何も表示しない
 type StateOnly = "PREPARING" | "CONFIRMING" | "PAID" | "EXPIRED" | "CONTACT_SHOP" | "NOT_APPLICABLE";
 export type ExtensionView = { state: StateOnly } | { state: "AWAITING_PAYMENT"; checkoutLink: string };
@@ -29,6 +29,26 @@ export async function invoiceForExtension(deps: InvoiceDeps, shopifyOrderId: str
       return view(deps, result.payment, result.invoice.checkoutLink);
     case "EXISTING":
       return view(deps, result.payment, null);
+    case "ORDER_NOT_FOUND":
+      return { state: "PREPARING" };
+    case "NOT_ELIGIBLE":
+      return { state: "NOT_APPLICABLE" };
+  }
+}
+
+// 拡張の「invoice を再発行」ボタン（design.md 5.4）。EXPIRED でなければ何もせず、今の表示状態を返す
+export async function reissueForExtension(deps: InvoiceDeps, shopifyOrderId: string): Promise<ExtensionView> {
+  // invoiceForExtension と同じく、セッショントークンのショップの Admin API で取れる注文だけを扱う
+  const order = await deps.shopify.getOrder(shopifyOrderId);
+  if (!order) return { state: "PREPARING" };
+
+  const result = await reissueInvoice(deps, shopifyOrderId);
+  switch (result.outcome) {
+    case "REISSUED":
+      return view(deps, result.payment, result.invoice.checkoutLink);
+    case "NOT_EXPIRED":
+      return view(deps, result.payment, null);
+    case "PAYMENT_NOT_FOUND":
     case "ORDER_NOT_FOUND":
       return { state: "PREPARING" };
     case "NOT_ELIGIBLE":

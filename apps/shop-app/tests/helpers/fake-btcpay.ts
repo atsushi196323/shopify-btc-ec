@@ -34,6 +34,16 @@ export class FakeBtcpayGateway implements BtcpayGateway {
     return [...this.invoices.values()].filter((invoice) => invoice.attemptId === attemptId).map((i) => structuredClone(i));
   }
 
+  readonly invalidated: string[] = [];
+
+  // 本物と同じく、入金の様子は残したまま INVALID にする（ADR 9）
+  async invalidateInvoice(invoiceId: string): Promise<void> {
+    const invoice = this.invoices.get(invoiceId);
+    if (!invoice) throw new Error(`invoice ${invoiceId} がない`);
+    this.invalidated.push(invoiceId);
+    invoice.observation = { ...invoice.observation, status: "INVALID" };
+  }
+
   setObservation(invoiceId: string, observation: InvoiceObservation): void {
     const invoice = this.invoices.get(invoiceId);
     if (!invoice) throw new Error(`invoice ${invoiceId} がない`);

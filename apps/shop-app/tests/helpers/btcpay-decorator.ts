@@ -24,6 +24,10 @@ export class InjectingBtcpayGateway implements BtcpayGateway {
   findInvoicesByAttemptId(attemptId: string): Promise<BtcpayInvoice[]> {
     return this.inner.findInvoicesByAttemptId(attemptId);
   }
+
+  invalidateInvoice(invoiceId: string): Promise<void> {
+    return this.inner.invalidateInvoice(invoiceId);
+  }
 }
 
 export const delay = (ms: number) => () => new Promise<void>((resolve) => setTimeout(resolve, ms));
