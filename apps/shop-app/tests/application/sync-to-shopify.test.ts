@@ -114,15 +114,25 @@ describe("syncPaymentToShopify", () => {
     ["キャンセル済み", { cancelled: true }],
     ["返金済み", { financialStatus: "REFUNDED" }],
     ["取り消し済み", { financialStatus: "VOIDED" }],
-  ])("%s の注文には orderMarkAsPaid を呼ばず、タグだけ付けて DONE にする", async (_label, change) => {
+  ])("%s の注文は支払い済みにせず、そのことをタグで知らせて DONE にする", async (_label, change) => {
     const { paymentId, invoiceId, shopifyOrderId } = await awaitingPayment();
     shopify.addOrder({ ...(await shopify.getOrder(shopifyOrderId))!, ...change });
 
-    expect(await observe(invoiceId, { status: "SETTLED", received: "OVER" })).toMatchObject({ sync: { outcome: "SYNCED" } });
+    // フラグのない全額の入金でも、支払い済みにできなかったことは Shopify で見える
+    expect(await observe(invoiceId, { status: "SETTLED", received: "FULL" })).toMatchObject({ sync: { outcome: "SYNCED" } });
 
     expect(shopify.markedAsPaid).toEqual([]);
-    expect(shopify.orderTags(shopifyOrderId)).toEqual(["btc-review-overpaid"]);
-    expect(await paymentRow(paymentId)).toMatchObject({ status: "PAID", shopifySync: "DONE" });
+    expect(shopify.orderTags(shopifyOrderId)).toEqual(["btc-review-not-marked-paid"]);
+    expect(await paymentRow(paymentId)).toMatchObject({ status: "PAID", shopifySync: "DONE", shopifySyncError: null });
+  });
+
+  it("支払い済みにできない注文でも、フラグのタグは付く", async () => {
+    const { invoiceId, shopifyOrderId } = await awaitingPayment();
+    shopify.addOrder({ ...(await shopify.getOrder(shopifyOrderId))!, cancelled: true });
+
+    await observe(invoiceId, { status: "SETTLED", received: "OVER" });
+
+    expect(shopify.orderTags(shopifyOrderId)).toEqual(["btc-review-not-marked-paid", "btc-review-overpaid"]);
   });
 
   it("PAID でなくフラグもなければ、Shopify は呼ばずに DONE にする", async () => {

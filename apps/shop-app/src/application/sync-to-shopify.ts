@@ -2,6 +2,7 @@
 // 遷移が起きた瞬間に1回だけ呼ぶのではなく、shopifySync = PENDING の Payment を追いつかせる。
 // どの手順も冪等なので、イベント処理の commit の直後とスイープのどちらから、何度呼んでも同じ結果になる
 import type { ReviewReason } from "../domain/review-flag";
+import { PAYABLE_FINANCIAL_STATUSES } from "./order-eligibility";
 import type { PaymentRepository } from "./ports/payment-repository";
 import type { ShopifyGateway, ShopifyGatewayForShop } from "./ports/shopify-gateway";
 
@@ -44,7 +45,10 @@ async function sync(deps: ShopifySyncDeps, paymentId: string): Promise<ShopifySy
       // タグを先に付ける。支払い済みにできない注文（キャンセル済みなど）でも、人が対応すべき異常は Shopify で見えるようにする
       const tags = payment.unresolvedReasons.map(reviewTag);
       if (tags.length > 0) await shopify.addOrderTags(payment.shopifyOrderId, tags);
-      if (payment.status === "PAID") await markAsPaid(shopify, payment.shopifyOrderId);
+      if (payment.status === "PAID") {
+        const marked = await markAsPaid(shopify, payment.shopifyOrderId);
+        if (marked === "CANNOT_MARK") await shopify.addOrderTags(payment.shopifyOrderId, [NOT_MARKED_PAID_TAG]);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await deps.payments.recordSyncError(paymentId, message);
@@ -57,19 +61,23 @@ async function sync(deps: ShopifySyncDeps, paymentId: string): Promise<ShopifySy
   return { outcome: "SUPERSEDED" };
 }
 
+// 入金は確定したのに、注文を支払い済みにできなかった（キャンセル済み・返金済みなど）ことを知らせるタグ。
+// フラグにない事情だが、人が返金などを判断する必要があるので、Shopify の注文で見えるようにする（ADR 8）
+export const NOT_MARKED_PAID_TAG = "btc-review-not-marked-paid";
+
 // 未対応のフラグから導出するタグ。例: LATE_PAYMENT → btc-review-late-payment
 export function reviewTag(reason: ReviewReason): string {
   return `btc-review-${reason.toLowerCase().replaceAll("_", "-")}`;
 }
 
-// orderMarkAsPaid を呼ばない注文の状態。支払い済みは反映が済んでいる。返金済み・取り消し済みは支払い済みにできず、
-// 呼ぶと失敗し続けて PENDING のまま残るので、反映を打ち切る（ADR 8）
-const SKIP_MARK_AS_PAID = ["PAID", "REFUNDED", "PARTIALLY_REFUNDED", "VOIDED"];
-
-// 先に注文を確かめ、キャンセル済みの注文と SKIP_MARK_AS_PAID の注文には orderMarkAsPaid を呼ばない
-async function markAsPaid(shopify: ShopifyGateway, shopifyOrderId: string): Promise<void> {
+// orderMarkAsPaid を呼ぶのは、支払いを待っている注文（invoice を作れる注文と同じ状態。ADR 4）だけにする。
+// それ以外（キャンセル済み・返金済み・取り消し済みなど）は支払い済みにできず、呼ぶと失敗し続けて PENDING のまま残るので、
+// 反映を打ち切って CANNOT_MARK を返す（ADR 8）
+async function markAsPaid(shopify: ShopifyGateway, shopifyOrderId: string): Promise<"MARKED" | "ALREADY_PAID" | "CANNOT_MARK"> {
   const order = await shopify.getOrder(shopifyOrderId);
   if (!order) throw new Error(`Shopify の注文 ${shopifyOrderId} がない`);
-  if (order.cancelled || SKIP_MARK_AS_PAID.includes(order.financialStatus)) return;
+  if (order.financialStatus === "PAID") return "ALREADY_PAID";
+  if (order.cancelled || !PAYABLE_FINANCIAL_STATUSES.includes(order.financialStatus)) return "CANNOT_MARK";
   await shopify.markOrderAsPaid(shopifyOrderId);
+  return "MARKED";
 }

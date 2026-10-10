@@ -63,7 +63,8 @@ type VersionedWrite = { paymentId: string; expectedVersion: number };
 
 export type MarkInvalidatedInput = VersionedWrite & { attemptId: string };
 
-// 再発行（design.md 5.4）。state はドメインの reissue() の結果で、新しい試行（現在の試行）とポインタ・status をそのまま保存する
+// 再発行（design.md 5.4）。state はドメインの reissue() の結果。保存するのは、reissue() が変えるものだけ:
+// status、新しい試行（state の現在の試行。まだ DB にないこと）、ポインタ。ほかの試行とフラグは変わらない
 export type SaveReissueInput = VersionedWrite & { state: PaymentState };
 
 // Shopify への反映（design.md 4章「Shopify への反映」）に使う、Payment の現在の様子

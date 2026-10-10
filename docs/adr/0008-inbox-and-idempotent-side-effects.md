@@ -87,8 +87,10 @@ DB と外部システム（BTCPay、Shopify）を1つのトランザクション
   - 未対応のフラグから導出したタグを `tagsAdd` で付ける。書式は理由を小文字とハイフンにしたもの（例: `btc-review-late-payment`）。
     支払い済みにできない注文（キャンセル済みなど）でも異常が Shopify で見えるように、タグを `orderMarkAsPaid` より先に付ける。
   - PAID なら、`getOrder` で `displayFinancialStatus` を確かめ、PAID でなければ `orderMarkAsPaid` を呼ぶ。
-    注文がキャンセル済み、または返金済み・取り消し済み（`REFUNDED`・`PARTIALLY_REFUNDED`・`VOIDED`）なら呼ばない（2026-10-10 のレビューで追加）。
-    支払い済みにできない注文で呼ぶと失敗し続け、反映が PENDING のまま残ってほかの失敗を埋もれさせるため。タグは付けて DONE にする。
+    呼ぶのは、支払いを待っている注文（`PENDING`・`PARTIALLY_PAID` で、キャンセルされていない。invoice を作れる注文と同じ。ADR 4）だけにする（2026-10-10 のレビューで追加）。
+    キャンセル済み・返金済みなど、支払い済みにできない注文で呼ぶと失敗し続け、反映が PENDING のまま残ってほかの失敗を埋もれさせるため。
+    そうした注文には、入金は確定したのに支払い済みにできなかったことを示すタグ `btc-review-not-marked-paid` を付けて DONE にする
+    （フラグにない事情だが、返金などを人が判断する必要がある）。
   - mutation の `userErrors` と、payload が null の結果も失敗として扱う。失敗は `shopifySyncError` に記録し、PENDING のまま残す。すでに DONE なら記録しない。
   - 同じ Payment の反映は、プロセスの中で順番に流す（Payment ごとの待ち行列）。並行した2つの反映が、どちらも未払いと見て
     `orderMarkAsPaid` を2回呼ぶのを防ぐ。ワーカーとスイープは同じプロセスで動くので、これで足りる（水平スケールは考慮しない）。

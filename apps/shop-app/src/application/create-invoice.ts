@@ -114,16 +114,23 @@ export async function reissueInvoice(deps: InvoiceDeps, shopifyOrderId: string):
     if (!loaded) throw new Error(`試行 ${current.currentAttempt.id} がない`);
     const newAttemptId = newId();
     const reissued = reissue(loaded.state, newAttemptId);
-    if (!reissued.ok) return { outcome: "NOT_EXPIRED", payment: current };
+    // 注文を確かめている間に、別の再発行や期限後の入金で EXPIRED でなくなった。今の Payment を読み直して返す
+    if (!reissued.ok) {
+      const latest = await deps.payments.findByShopifyOrderId(shopifyOrderId);
+      if (!latest) throw new Error(`注文 ${shopifyOrderId} の Payment が消えた`);
+      return { outcome: "NOT_EXPIRED", payment: latest };
+    }
 
     const saved = await deps.payments.saveReissue({
       paymentId: loaded.paymentId,
       expectedVersion: loaded.version,
       state: reissued.state,
     });
-    // 読んだ後に別の処理が更新した。保存しなかった側が返す今の Payment で判定し直す
-    current = saved.payment;
-    if (!saved.saved) continue;
+    if (!saved.saved) {
+      // 読んだ後に別の処理が更新した。保存しなかった側が返す今の Payment で判定し直す
+      current = saved.payment;
+      continue;
+    }
 
     const invoice = await deps.btcpay.createInvoice({ attemptId: newAttemptId, shopifyOrderId, ...order.amount });
     const attached = await attach(deps, newAttemptId, invoice);

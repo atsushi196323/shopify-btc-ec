@@ -12,13 +12,9 @@ import type { PaymentSnapshot } from "./ports/payment-repository";
 type StateOnly = "PREPARING" | "CONFIRMING" | "PAID" | "EXPIRED" | "CONTACT_SHOP" | "NOT_APPLICABLE";
 export type ExtensionView = { state: StateOnly } | { state: "AWAITING_PAYMENT"; checkoutLink: string };
 
+// 拡張から届いた shopifyOrderId は信用しない（ADR 4）。Payment があれば、そのショップがセッションのショップと同じときだけ状態を返す。
+// Payment がなければ、作成の中で、セッションのショップの Admin API で注文を取り直す（見えなければ作らない）
 export async function invoiceForExtension(deps: InvoiceDeps, shopifyOrderId: string): Promise<ExtensionView> {
-  // 拡張から届いた shopifyOrderId は信用しない。セッショントークンのショップの Admin API で取れる注文だけを扱う。
-  // ここで確かめないと、別のショップの注文の状態を返しうる
-  const order = await deps.shopify.getOrder(shopifyOrderId);
-  // Thank you ページの表示は注文の作成と同時なので、Admin API でまだ見えないことがある。待ってから問い合わせ直してもらう
-  if (!order) return { state: "PREPARING" };
-
   const existing = await deps.payments.findByShopifyOrderId(shopifyOrderId);
   if (existing) return view(deps, existing, null);
 
@@ -29,6 +25,7 @@ export async function invoiceForExtension(deps: InvoiceDeps, shopifyOrderId: str
       return view(deps, result.payment, result.invoice.checkoutLink);
     case "EXISTING":
       return view(deps, result.payment, null);
+    // Thank you ページの表示は注文の作成と同時なので、Admin API でまだ見えないことがある。待ってから問い合わせ直してもらう
     case "ORDER_NOT_FOUND":
       return { state: "PREPARING" };
     case "NOT_ELIGIBLE":
@@ -63,6 +60,8 @@ const VIEW_STATES: Record<Exclude<PaymentStatus, "AWAITING_PAYMENT">, StateOnly>
 
 // checkout link は DB に持たないので、支払い待ちのときだけ BTCPay から取る（作った直後は作成の結果を使う）
 async function view(deps: InvoiceDeps, payment: PaymentSnapshot, createdLink: string | null): Promise<ExtensionView> {
+  // 別のショップの Payment は、注文が見えないときと同じに扱う（状態を返さない）
+  if (payment.shop !== deps.shop) return { state: "PREPARING" };
   if (payment.status !== "AWAITING_PAYMENT") return { state: VIEW_STATES[payment.status] };
   const invoiceId = payment.currentAttempt.btcpayInvoiceId;
   // AWAITING_PAYMENT になるのは試行に invoice を紐づけたときだけなので、ここには来ない

@@ -124,6 +124,10 @@ describe("再発行と無効化", () => {
       const results = await Promise.all(Array.from({ length: 5 }, () => reissueInvoice(deps, shopifyOrderId)));
 
       expect(results.filter((r) => r.outcome === "REISSUED")).toHaveLength(1);
+      // 負けた側は、読み直した今の Payment を返す（EXPIRED のままの古い状態を返さない）
+      for (const r of results) {
+        if (r.outcome === "NOT_EXPIRED") expect(r.payment.status).not.toBe("EXPIRED");
+      }
       expect(btcpay.created).toHaveLength(2);
       expect((await paymentRow(paymentId)).attempts).toHaveLength(2);
     });
@@ -169,7 +173,16 @@ describe("再発行と無効化", () => {
       expect(getOrderCalls).toBe(1);
     });
 
-    it("新しい checkout link を返す。Admin API で見えない注文は Payment を見ずに PREPARING", async () => {
+    it("Payment はあるが Admin API で注文が見えなければ、再発行せずに PREPARING", async () => {
+      const { shopifyOrderId, paymentId } = await expiredOrder();
+      const hidden = Object.create(shopify) as FakeShopifyGateway;
+      hidden.getOrder = async () => null;
+
+      expect(await reissueForExtension({ ...deps, shopify: hidden }, shopifyOrderId)).toEqual({ state: "PREPARING" });
+      expect(await paymentRow(paymentId)).toMatchObject({ status: "EXPIRED", attempts: [expect.anything()] });
+    });
+
+    it("新しい checkout link を返す。Payment のない注文は PREPARING", async () => {
       const { shopifyOrderId, oldInvoiceId } = await expiredOrder();
 
       const view = await reissueForExtension(deps, shopifyOrderId);

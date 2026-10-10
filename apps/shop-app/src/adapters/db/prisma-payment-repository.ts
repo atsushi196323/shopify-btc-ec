@@ -181,7 +181,9 @@ export class PrismaPaymentRepository implements PaymentRepository {
 
   async saveReissue({ paymentId, expectedVersion, state }: SaveReissueInput) {
     const next = state.attempts.find((a) => a.id === state.currentAttemptId);
-    if (!next) throw new Error(`再発行の結果に現在の試行 ${state.currentAttemptId} がない`);
+    if (!next || next.status !== "CREATING") {
+      throw new Error(`再発行の結果の現在の試行 ${state.currentAttemptId} が、新しい CREATING の試行ではない`);
+    }
     return this.prisma.$transaction(async (tx) => {
       // 最初に書き込んでロックを取る。試行の作成とポインタの付け替えは、同じトランザクションで行う（ADR 7）。
       // status が変わるので、ほかの遷移と同じく Shopify への反映待ちにする（design.md 4章「Shopify への反映」の1）
