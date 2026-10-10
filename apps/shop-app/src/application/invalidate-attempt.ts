@@ -5,9 +5,7 @@
 import { attemptToInvalidate } from "../domain/payment";
 import type { BtcpayGateway } from "./ports/btcpay-gateway";
 import type { PaymentRepository } from "./ports/payment-repository";
-
-// version の競合で読み直す回数（ワーカーと同じ）
-const MAX_CONFLICT_RETRIES = 3;
+import { MAX_CONFLICT_RETRIES } from "./retry-limits";
 
 export type InvalidateDeps = { payments: PaymentRepository; btcpay: BtcpayGateway };
 

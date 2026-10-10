@@ -173,10 +173,11 @@ export class PrismaPaymentRepository implements PaymentRepository {
 
   async saveReissue({ paymentId, expectedVersion, newAttemptId }: SaveReissueInput) {
     return this.prisma.$transaction(async (tx) => {
-      // 最初に書き込んでロックを取る。試行の作成とポインタの付け替えは、同じトランザクションで行う（ADR 7）
+      // 最初に書き込んでロックを取る。試行の作成とポインタの付け替えは、同じトランザクションで行う（ADR 7）。
+      // status が変わるので、ほかの遷移と同じく Shopify への反映待ちにする（design.md 4章「Shopify への反映」の1）
       const updated = await tx.payment.updateMany({
         where: { id: paymentId, version: expectedVersion },
-        data: { status: "CREATING", version: { increment: 1 } },
+        data: { status: "CREATING", version: { increment: 1 }, shopifySync: "PENDING" },
       });
       if (updated.count === 0) return { saved: false, payment: toSnapshot(await findPayment(tx, paymentId)) };
       await tx.invoiceAttempt.create({ data: { id: newAttemptId, paymentId } });

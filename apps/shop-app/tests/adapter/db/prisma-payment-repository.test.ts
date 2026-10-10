@@ -362,6 +362,9 @@ describe("PrismaPaymentRepository", () => {
         saved: true,
         payment: { status: "CREATING", version: 2, currentAttempt: { id: newAttemptId, status: "CREATING", btcpayInvoiceId: null } },
       });
+      expect(await prisma.payment.findUniqueOrThrow({ where: { id: payment.paymentId } })).toMatchObject({
+        shopifySync: "PENDING",
+      });
     });
   });
 });

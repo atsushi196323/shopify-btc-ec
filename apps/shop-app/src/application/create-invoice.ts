@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { applyObservation, reissue } from "../domain/payment";
 import { invalidateAttempt } from "./invalidate-attempt";
 import { checkOrderEligibility, type IneligibleReason } from "./order-eligibility";
+import { MAX_CONFLICT_RETRIES } from "./retry-limits";
 import type { BtcpayGateway, BtcpayInvoice } from "./ports/btcpay-gateway";
 import type { AttemptSnapshot, PaymentRepository, PaymentSnapshot } from "./ports/payment-repository";
 import type { ShopifyGateway } from "./ports/shopify-gateway";
@@ -94,9 +95,6 @@ export type ReissueInvoiceResult =
   | { outcome: "PAYMENT_NOT_FOUND" }
   | OrderRejection;
 
-// version の競合で読み直す回数（ワーカーと同じ）
-const MAX_REISSUE_ROUNDS = 3;
-
 // 再発行（design.md 5.4）。起点は拡張の「invoice を再発行」ボタンで、Payment が EXPIRED のときだけ受け付ける。
 // 1つのトランザクションで新しい試行を作ってポインタを付け替え、commit の後に BTCPay を呼ぶ（5.1 の 4 以降と同じ）。
 // BTCPay の呼び出しや紐づけで例外が出たら、新しい試行は CREATING のまま残り、スイープの孤児回復が追いつかせる
@@ -110,7 +108,7 @@ export async function reissueInvoice(deps: InvoiceDeps, shopifyOrderId: string):
   if (!order.payable) return order.rejection;
 
   const newId = deps.newId ?? randomUUID;
-  for (let i = 0; i < MAX_REISSUE_ROUNDS; i++) {
+  for (let i = 0; i < MAX_CONFLICT_RETRIES; i++) {
     const current = await deps.payments.findByShopifyOrderId(shopifyOrderId);
     if (!current) throw new Error(`注文 ${shopifyOrderId} の Payment が消えた`);
     const loaded = await deps.payments.loadForAttempt(current.currentAttempt.id);
@@ -132,7 +130,7 @@ export async function reissueInvoice(deps: InvoiceDeps, shopifyOrderId: string):
       ? { outcome: "REISSUED", payment: attached.payment, invoice }
       : { outcome: "NOT_EXPIRED", payment: attached.payment };
   }
-  throw new Error(`version の競合が ${MAX_REISSUE_ROUNDS} 回続いた`);
+  throw new Error(`version の競合が ${MAX_CONFLICT_RETRIES} 回続いた`);
 }
 
 type PayableOrder =
