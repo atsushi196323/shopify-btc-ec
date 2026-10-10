@@ -1,18 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { checkOrderEligibility, type IneligibleReason } from "../../src/application/order-eligibility";
 import type { ShopifyOrder } from "../../src/application/ports/shopify-gateway";
+import { bitcoinOrder } from "../helpers/orders";
 
 // invoice を作れる注文かどうかの判断（ADR 4）。依存なし
 describe("checkOrderEligibility", () => {
-  const order = (overrides: Partial<ShopifyOrder> = {}): ShopifyOrder => ({
-    shopifyOrderId: "gid://shopify/Order/1",
-    paymentGatewayNames: ["Bitcoinで支払う"],
-    financialStatus: "PENDING",
-    cancelled: false,
-    presentmentCurrencyCode: "JPY",
-    outstanding: { amount: "1000.0", currencyCode: "JPY" },
-    ...overrides,
-  });
+  const order = (overrides: Partial<ShopifyOrder> = {}): ShopifyOrder => bitcoinOrder(overrides);
 
   it("Bitcoinで支払う、支払い待ちの JPY の注文には invoice を作れる", () => {
     expect(checkOrderEligibility(order())).toEqual({ eligible: true });

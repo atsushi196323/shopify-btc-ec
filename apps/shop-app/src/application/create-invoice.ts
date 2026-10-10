@@ -46,10 +46,7 @@ export async function createInvoiceForOrder(deps: InvoiceDeps, shopifyOrderId: s
   });
   if (!reservation.reserved) return { outcome: "EXISTING", payment: reservation.payment };
 
-  const attemptId = reservation.payment.currentAttempt.id;
-  const invoice = await deps.btcpay.createInvoice({ attemptId, shopifyOrderId, ...order.amount });
-  const attached = await attach(deps, attemptId, invoice);
-  // 紐づけに負けたのは、この呼び出しが遅れている間にスイープが回復した場合。勝った側の invoice を正とする
+  const { invoice, attached } = await createAndAttach(deps, reservation.payment.currentAttempt.id, shopifyOrderId, order);
   return attached.attached
     ? { outcome: "CREATED", payment: attached.payment, invoice }
     : { outcome: "EXISTING", payment: attached.payment };
@@ -81,8 +78,7 @@ export async function recoverCreatingAttempt(deps: InvoiceDeps, attemptId: strin
   // 予約から時間が経っているので、作り直す前に注文を確かめ直す（その間にキャンセル・別の方法での支払いがありうる）
   const order = await fetchPayableOrder(deps, attempt.shopifyOrderId);
   if (!order.payable) return order.rejection;
-  const invoice = await deps.btcpay.createInvoice({ attemptId, shopifyOrderId: attempt.shopifyOrderId, ...order.amount });
-  const attached = await attach(deps, attemptId, invoice);
+  const { attached } = await createAndAttach(deps, attemptId, attempt.shopifyOrderId, order);
   return attached.attached ? { outcome: "RECREATED", payment: attached.payment } : { outcome: "ALREADY_ATTACHED" };
 }
 
@@ -132,9 +128,7 @@ export async function reissueInvoice(deps: InvoiceDeps, shopifyOrderId: string):
       continue;
     }
 
-    const invoice = await deps.btcpay.createInvoice({ attemptId: newAttemptId, shopifyOrderId, ...order.amount });
-    const attached = await attach(deps, newAttemptId, invoice);
-    // 紐づけに負けたのは、この呼び出しが遅れている間にスイープが回復した場合。勝った側の invoice を正とする
+    const { invoice, attached } = await createAndAttach(deps, newAttemptId, shopifyOrderId, order);
     return attached.attached
       ? { outcome: "REISSUED", payment: attached.payment, invoice }
       : { outcome: "NOT_EXPIRED", payment: attached.payment };
@@ -142,9 +136,8 @@ export async function reissueInvoice(deps: InvoiceDeps, shopifyOrderId: string):
   throw new Error(`version の競合が ${MAX_CONFLICT_RETRIES} 回続いた`);
 }
 
-type PayableOrder =
-  | { payable: true; amount: { amount: string; currency: string } }
-  | { payable: false; rejection: OrderRejection };
+type Amount = { amount: string; currency: string };
+type PayableOrder = { payable: true; amount: Amount } | { payable: false; rejection: OrderRejection };
 
 // 請求額は必ず Admin API から取り直し、invoice を作れる注文かを確かめる（ADR 4）。invoice を作る経路はすべてここを通す
 async function fetchPayableOrder(deps: InvoiceDeps, shopifyOrderId: string): Promise<PayableOrder> {
@@ -155,6 +148,13 @@ async function fetchPayableOrder(deps: InvoiceDeps, shopifyOrderId: string): Pro
     return { payable: false, rejection: { outcome: "NOT_ELIGIBLE", reason: eligibility.reason } };
   }
   return { payable: true, amount: { amount: order.outstanding.amount, currency: order.outstanding.currencyCode } };
+}
+
+// commit の後に BTCPay に invoice を作り、試行に紐づける（design.md 5.1 の 4・5）。
+// attached.attached が false なのは、この呼び出しが遅れている間にスイープが回復した場合。勝った側の invoice を正とする
+async function createAndAttach(deps: InvoiceDeps, attemptId: string, shopifyOrderId: string, order: { amount: Amount }) {
+  const invoice = await deps.btcpay.createInvoice({ attemptId, shopifyOrderId, ...order.amount });
+  return { invoice, attached: await attach(deps, attemptId, invoice) };
 }
 
 function isUnattached(attempt: AttemptSnapshot): boolean {

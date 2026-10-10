@@ -8,8 +8,8 @@ import { createInvoiceForOrder } from "../../src/application/create-invoice";
 import { ForeignInvoiceError, type BtcpayGateway } from "../../src/application/ports/btcpay-gateway";
 import type { InboxRepository } from "../../src/application/ports/inbox-repository";
 import type { PaymentRepository } from "../../src/application/ports/payment-repository";
+import { MAX_CONFLICT_RETRIES } from "../../src/application/retry-limits";
 import {
-  MAX_CONFLICT_RETRIES,
   MAX_INBOX_ATTEMPTS,
   processBtcpayEvent,
   type ProcessEventDeps,
@@ -17,6 +17,7 @@ import {
 import type { InvoiceObservation } from "../../src/domain/payment";
 import { FakeBtcpayGateway } from "../helpers/fake-btcpay";
 import { createTestDb } from "../helpers/test-db";
+import { addBitcoinOrder, TEST_SHOP } from "../helpers/orders";
 
 // BTCPay の Webhook のワーカー（design.md 5.3、ADR 8）。DB は本物の SQLite、BTCPay はフェイク。
 // 本物の BTCPay から届く Webhook での確認は、統合テストのシナリオで行う
@@ -47,16 +48,8 @@ describe("processBtcpayEvent", () => {
 
   // 紐づけ済みの invoice（NEW・AWAITING_PAYMENT）を1つ作る
   async function awaitingPayment(): Promise<{ paymentId: string; attemptId: string; invoiceId: string }> {
-    const shopifyOrderId = `gid://shopify/Order/${randomUUID()}`;
-    shopify.addOrder({
-      shopifyOrderId,
-      paymentGatewayNames: ["Bitcoinで支払う"],
-      financialStatus: "PENDING",
-      cancelled: false,
-      presentmentCurrencyCode: "JPY",
-      outstanding: { amount: "1000.0", currencyCode: "JPY" },
-    });
-    const created = await createInvoiceForOrder({ shop: "test-shop.myshopify.com", payments, btcpay, shopify }, shopifyOrderId);
+    const shopifyOrderId = addBitcoinOrder(shopify);
+    const created = await createInvoiceForOrder({ shop: TEST_SHOP, payments, btcpay, shopify }, shopifyOrderId);
     if (created.outcome !== "CREATED") throw new Error(`CREATED ではない: ${created.outcome}`);
     return {
       paymentId: created.payment.paymentId,
@@ -169,7 +162,7 @@ describe("processBtcpayEvent", () => {
 
   it("試行に invoice がまだ紐づいていなければ、PENDING のまま残して後で処理する", async () => {
     const shopifyOrderId = randomUUID();
-    const reservation = await payments.reserve({ paymentId: randomUUID(), attemptId: randomUUID(), shop: "test-shop.myshopify.com", shopifyOrderId });
+    const reservation = await payments.reserve({ paymentId: randomUUID(), attemptId: randomUUID(), shop: TEST_SHOP, shopifyOrderId });
     const attemptId = reservation.payment.currentAttempt.id;
     const invoice = await btcpay.createInvoice({ attemptId, shopifyOrderId, amount: "1000.0", currency: "JPY" });
     const inboxId = await receive(invoice.invoiceId);

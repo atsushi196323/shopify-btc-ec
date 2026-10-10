@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb } from "../../helpers/test-db";
+import { TEST_SHOP } from "../../helpers/orders";
 
 function hasCode(code: string) {
   return (error: unknown) => error instanceof Prisma.PrismaClientKnownRequestError && error.code === code;
@@ -24,7 +25,7 @@ describe("ReviewFlag と Inbox の制約", () => {
     const paymentId = randomUUID();
     const attemptId = randomUUID();
     await prisma.$transaction(async (tx) => {
-      await tx.payment.create({ data: { id: paymentId, shop: "test-shop.myshopify.com", shopifyOrderId: randomUUID() } });
+      await tx.payment.create({ data: { id: paymentId, shop: TEST_SHOP, shopifyOrderId: randomUUID() } });
       await tx.invoiceAttempt.create({ data: { id: attemptId, paymentId } });
       await tx.payment.update({ where: { id: paymentId }, data: { currentAttemptId: attemptId } });
     });

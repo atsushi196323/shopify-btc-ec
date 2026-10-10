@@ -15,7 +15,7 @@ import type {
   SaveObservationInput,
   SaveReissueInput,
 } from "../../application/ports/payment-repository";
-import type { PaymentState } from "../../domain/payment";
+import type { ObservationResult, PaymentState } from "../../domain/payment";
 import { TRANSACTION_OPTIONS } from "./sqlite";
 
 const withCurrentAttempt = { currentAttempt: true } satisfies Prisma.PaymentInclude;
@@ -87,28 +87,11 @@ export class PrismaPaymentRepository implements PaymentRepository {
 
       const payment = await tx.payment.findUniqueOrThrow({ where: { id: attempt.paymentId }, include: withState });
       const result = decide(toPaymentState(payment));
-      const next = result.state.attempts.find((a) => a.id === attemptId);
-      if (!next) throw new Error(`判定の結果に試行 ${attemptId} がない`);
-
-      await tx.invoiceAttempt.update({
-        where: { id: attemptId },
-        data: { status: next.status, paymentDetected: next.paymentDetected },
-      });
-      // 紐づけは試行を必ず変えるので、version は常に上げる（試行の変更も version に含める。ADR 6 の直列化）。
-      // Shopify への反映待ちにするのは、status かフラグが変わったときだけ（ドメインの needsShopifySync）。
+      // 紐づけは試行を必ず変えるので、version は常に上げる（ADR 6 の直列化）。
       // 書き込みロックを持っているので競合は起きないが、version の約束（読んだ値からの +1）を条件でも守る
-      const updated = await tx.payment.updateMany({
-        where: { id: payment.id, version: payment.version },
-        data: {
-          status: result.state.status,
-          version: { increment: 1 },
-          ...(result.needsShopifySync ? { shopifySync: "PENDING" as const } : {}),
-        },
-      });
-      if (updated.count !== 1) throw new Error(`Payment ${payment.id} の version が読んだ後に変わった`);
-      await tx.reviewFlag.createMany({
-        data: result.newFlags.map((flag) => ({ id: randomUUID(), paymentId: payment.id, ...flag })),
-      });
+      if (!(await writeObservation(tx, payment.id, payment.version, attemptId, result))) {
+        throw new Error(`Payment ${payment.id} の version が読んだ後に変わった`);
+      }
       return {
         attached: true,
         payment: toSnapshot(await findPayment(tx, payment.id)),
@@ -132,28 +115,9 @@ export class PrismaPaymentRepository implements PaymentRepository {
   }
 
   async saveObservation({ paymentId, expectedVersion, attemptId, result, inboxId }: SaveObservationInput) {
-    const next = result.state.attempts.find((a) => a.id === attemptId);
-    if (!next) throw new Error(`判定の結果に試行 ${attemptId} がない`);
     try {
       await this.prisma.$transaction(async (tx) => {
-        // 最初に書き込んでロックを取る（attachInvoice と同じ理由）。読んだ後に別の処理が更新していれば0件になる。
-        // 試行だけが変わる場合（NEW のままの一部入金など）も version を上げる。ほかの試行の判定（DOUBLE_PAYMENT）がこの試行の入金を見るため
-        const updated = await tx.payment.updateMany({
-          where: { id: paymentId, version: expectedVersion },
-          data: {
-            status: result.state.status,
-            version: { increment: 1 },
-            ...(result.needsShopifySync ? { shopifySync: "PENDING" as const } : {}),
-          },
-        });
-        if (updated.count === 0) throw new VersionConflict();
-        await tx.invoiceAttempt.update({
-          where: { id: attemptId },
-          data: { status: next.status, paymentDetected: next.paymentDetected },
-        });
-        await tx.reviewFlag.createMany({
-          data: result.newFlags.map((flag) => ({ id: randomUUID(), paymentId, ...flag })),
-        });
+        if (!(await writeObservation(tx, paymentId, expectedVersion, attemptId, result))) throw new VersionConflict();
         await tx.inbox.update({ where: { id: inboxId }, data: { status: "DONE" } });
       }, TRANSACTION_OPTIONS);
       return { saved: true };
@@ -242,6 +206,37 @@ export class PrismaPaymentRepository implements PaymentRepository {
       data: { shopifySyncError: error },
     });
   }
+}
+
+// 判定の結果を保存する。最初の書き込み（Payment の version 付きの更新）でロックを取る（attachInvoice のコメントと同じ理由）。
+// 試行だけが変わる場合（NEW のままの一部入金など）も version を上げる。ほかの試行の判定（DOUBLE_PAYMENT）がこの試行の入金を見るため。
+// Shopify への反映待ちにするのは、status かフラグが変わったときだけ（ドメインの needsShopifySync）。false は version の競合
+async function writeObservation(
+  tx: Prisma.TransactionClient,
+  paymentId: string,
+  expectedVersion: number,
+  attemptId: string,
+  result: ObservationResult,
+): Promise<boolean> {
+  const next = result.state.attempts.find((a) => a.id === attemptId);
+  if (!next) throw new Error(`判定の結果に試行 ${attemptId} がない`);
+  const updated = await tx.payment.updateMany({
+    where: { id: paymentId, version: expectedVersion },
+    data: {
+      status: result.state.status,
+      version: { increment: 1 },
+      ...(result.needsShopifySync ? { shopifySync: "PENDING" as const } : {}),
+    },
+  });
+  if (updated.count === 0) return false;
+  await tx.invoiceAttempt.update({
+    where: { id: attemptId },
+    data: { status: next.status, paymentDetected: next.paymentDetected },
+  });
+  await tx.reviewFlag.createMany({
+    data: result.newFlags.map((flag) => ({ id: randomUUID(), paymentId, ...flag })),
+  });
+  return true;
 }
 
 function toPaymentState(payment: PaymentWithState): PaymentState {

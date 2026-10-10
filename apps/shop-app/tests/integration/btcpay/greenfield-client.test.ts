@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import type { BtcpayInvoice } from "../../../src/application/ports/btcpay-gateway";
 import { BtcpayApiError, GreenfieldClient, type GreenfieldConfig } from "../../../src/adapters/btcpay/greenfield-client";
 import { ForeignInvoiceError } from "../../../src/application/ports/btcpay-gateway";
-import { btcpayConfig, mineBlocks, pay } from "../../helpers/regtest";
+import { btcpayConfig, greenfieldApi, mineBlocks, pay, paymentMethod } from "../../helpers/regtest";
 
 // 本物の BTCPay（regtest）に対して、GreenfieldClient が BtcpayGateway の約束どおりに動くことを確かめる。
 // 固定レートは BTC_JPY = 10000000（1円 = 10 sat、ADR 10）
@@ -32,7 +32,7 @@ describe("GreenfieldClient（regtest）", () => {
     expect(invoice.observation).toEqual({ status: "NEW", received: "NONE" });
     expect(invoice.checkoutLink).toContain(invoice.invoiceId);
 
-    const metadata = await greenfield<{ metadata: Record<string, unknown> }>(`/invoices/${invoice.invoiceId}`);
+    const metadata = await greenfieldApi<{ metadata: Record<string, unknown> }>(config, "GET", `/invoices/${invoice.invoiceId}`);
     expect(metadata.metadata).toMatchObject({ orderId: attemptId, shopifyOrderId: "gid://shopify/Order/1" });
   });
 
@@ -93,7 +93,7 @@ describe("GreenfieldClient（regtest）", () => {
 
   it("全額を払うと PROCESSING・FULL、1ブロックで SETTLED・FULL になる", async () => {
     const invoice = await create();
-    const { destination, due } = await paymentMethod(invoice.invoiceId);
+    const { destination, due } = await paymentMethod(config, invoice.invoiceId);
 
     pay(destination, due);
     expect(await waitFor(invoice.invoiceId, (i) => i.observation.status === "PROCESSING")).toMatchObject({
@@ -108,7 +108,7 @@ describe("GreenfieldClient（regtest）", () => {
 
   it("過払いは PROCESSING・OVER になる", async () => {
     const invoice = await create();
-    const { destination, due } = await paymentMethod(invoice.invoiceId);
+    const { destination, due } = await paymentMethod(config, invoice.invoiceId);
 
     pay(destination, (Number(due) * 2).toFixed(8));
 
@@ -119,7 +119,7 @@ describe("GreenfieldClient（regtest）", () => {
 
   it("一部だけ払うと NEW・PARTIAL になる", async () => {
     const invoice = await create();
-    const { destination, due } = await paymentMethod(invoice.invoiceId);
+    const { destination, due } = await paymentMethod(config, invoice.invoiceId);
 
     pay(destination, (Number(due) / 2).toFixed(8));
 
@@ -139,7 +139,7 @@ describe("GreenfieldClient（regtest）", () => {
 
   it("無効化した invoice への入金は、payment-methods から読んで INVALID・FULL になる（ADR 9）", async () => {
     const invoice = await create();
-    const { destination, due } = await paymentMethod(invoice.invoiceId);
+    const { destination, due } = await paymentMethod(config, invoice.invoiceId);
     await client.invalidateInvoice(invoice.invoiceId);
 
     pay(destination, due);
@@ -149,20 +149,6 @@ describe("GreenfieldClient（regtest）", () => {
     });
     mineBlocks(1);
   });
-
-  // ポートの外の操作（支払い先の取得）は、テストから Greenfield を直接呼ぶ
-  async function greenfield<T>(path: string): Promise<T> {
-    const response = await fetch(`${config.baseUrl}/api/v1/stores/${config.storeId}${path}`, {
-      headers: { Authorization: `token ${config.apiKey}` },
-    });
-    if (!response.ok) throw new Error(`${path}: ${response.status}`);
-    return (await response.json()) as T;
-  }
-
-  async function paymentMethod(invoiceId: string): Promise<{ destination: string; due: string }> {
-    const [method] = await greenfield<{ destination: string; due: string }[]>(`/invoices/${invoiceId}/payment-methods`);
-    return method;
-  }
 
   // BTCPay は NBXplorer 経由で非同期に入金を検知するので、状態が変わるまで待つ
   async function waitFor(invoiceId: string, done: (invoice: BtcpayInvoice) => boolean): Promise<BtcpayInvoice> {

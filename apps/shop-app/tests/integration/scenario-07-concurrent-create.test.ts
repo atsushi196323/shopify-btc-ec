@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GreenfieldClient, type GreenfieldConfig } from "../../src/adapters/btcpay/greenfield-client";
@@ -9,6 +8,7 @@ import { invoiceForExtension } from "../../src/application/extension-invoice";
 import { delay, InjectingBtcpayGateway } from "../helpers/btcpay-decorator";
 import { btcpayConfig } from "../helpers/regtest";
 import { createTestDb } from "../helpers/test-db";
+import { addBitcoinOrder, TEST_SHOP } from "../helpers/orders";
 
 // シナリオ7（design.md 7章、ADR 5）: invoice 作成の競合。
 // orders/create Webhook と拡張 API の入口（ルートが呼ぶユースケース）をそれぞれ10並列で呼び、
@@ -31,16 +31,8 @@ describe("シナリオ7: invoice 作成の競合（regtest）", () => {
   it("Webhook と拡張から10並列ずつ作成しても、Payment と BTCPay の invoice はどちらも1件", async () => {
     const shopify = new FakeShopifyGateway();
     const btcpay = new InjectingBtcpayGateway(new GreenfieldClient(config));
-    const deps: InvoiceDeps = { shop: "test-shop.myshopify.com", payments: new PrismaPaymentRepository(prisma), btcpay, shopify };
-    const shopifyOrderId = `gid://shopify/Order/${randomUUID()}`;
-    shopify.addOrder({
-      shopifyOrderId,
-      paymentGatewayNames: ["Bitcoinで支払う"],
-      financialStatus: "PENDING",
-      cancelled: false,
-      presentmentCurrencyCode: "JPY",
-      outstanding: { amount: "1000.0", currencyCode: "JPY" },
-    });
+    const deps: InvoiceDeps = { shop: TEST_SHOP, payments: new PrismaPaymentRepository(prisma), btcpay, shopify };
+    const shopifyOrderId = addBitcoinOrder(shopify);
     // 予約に勝った呼び出しが BTCPay から戻る前に、残りの全員が予約か既存の行の読み取りまで進むようにする
     btcpay.beforeCreate = delay(500);
     const startedAt = Math.floor(Date.now() / 1000);

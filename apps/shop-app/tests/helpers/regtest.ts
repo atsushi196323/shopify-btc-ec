@@ -41,13 +41,23 @@ export function mineBlocks(count = 1): void {
   bitcoinCli("-rpcwallet=default", "-generate", String(count));
 }
 
-// invoice のオンチェーンの支払い先と、残りの請求額（BTC）
-export async function paymentMethod(config: GreenfieldConfig, invoiceId: string): Promise<{ destination: string; due: string }> {
-  const response = await fetch(`${config.baseUrl}/api/v1/stores/${config.storeId}/invoices/${invoiceId}/payment-methods`, {
+// ポートの外の操作（支払い先の取得・Webhook の再送など）は、テストから Greenfield のストアの API を直接呼ぶ
+export async function greenfieldApi<T>(config: GreenfieldConfig, method: string, path: string): Promise<T> {
+  const response = await fetch(`${config.baseUrl}/api/v1/stores/${config.storeId}${path}`, {
+    method,
     headers: { Authorization: `token ${config.apiKey}` },
   });
-  if (!response.ok) throw new Error(`payment-methods: ${response.status} ${await response.text()}`);
-  const methods = (await response.json()) as { paymentMethodId: string; destination: string; due: string }[];
+  if (!response.ok) throw new Error(`${method} ${path}: ${response.status} ${await response.text()}`);
+  return (await response.json()) as T;
+}
+
+// invoice のオンチェーンの支払い先と、残りの請求額（BTC）
+export async function paymentMethod(config: GreenfieldConfig, invoiceId: string): Promise<{ destination: string; due: string }> {
+  const methods = await greenfieldApi<{ paymentMethodId: string; destination: string; due: string }[]>(
+    config,
+    "GET",
+    `/invoices/${invoiceId}/payment-methods`,
+  );
   const onchain = methods.find((method) => method.paymentMethodId === "BTC-CHAIN");
   if (!onchain) throw new Error(`invoice ${invoiceId} にオンチェーンの支払い方法がない`);
   return onchain;

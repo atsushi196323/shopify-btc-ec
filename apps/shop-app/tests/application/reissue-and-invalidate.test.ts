@@ -11,6 +11,7 @@ import { handleBtcpayEvent, type HandleEventDeps } from "../../src/application/p
 import type { InvoiceObservation } from "../../src/domain/payment";
 import { FakeBtcpayGateway } from "../helpers/fake-btcpay";
 import { createTestDb } from "../helpers/test-db";
+import { addBitcoinOrder, TEST_SHOP } from "../helpers/orders";
 
 // 再発行（design.md 5.4）と、古い試行への期限後の入金での無効化（4章「古い試行に期限後の入金があったとき」、ADR 9）。
 // DB は本物の SQLite、BTCPay と Shopify はフェイク。本物の BTCPay での確認はシナリオ2で行う
@@ -35,7 +36,7 @@ describe("再発行と無効化", () => {
     shopify = new FakeShopifyGateway();
     payments = new PrismaPaymentRepository(prisma);
     deps = {
-      shop: "test-shop.myshopify.com",
+      shop: TEST_SHOP,
       payments,
       btcpay,
       shopify,
@@ -44,18 +45,7 @@ describe("再発行と無効化", () => {
     };
   });
 
-  function addOrder(amount = "1000.0"): string {
-    const shopifyOrderId = `gid://shopify/Order/${randomUUID()}`;
-    shopify.addOrder({
-      shopifyOrderId,
-      paymentGatewayNames: ["Bitcoinで支払う"],
-      financialStatus: "PENDING",
-      cancelled: false,
-      presentmentCurrencyCode: "JPY",
-      outstanding: { amount, currencyCode: "JPY" },
-    });
-    return shopifyOrderId;
-  }
+  const addOrder = () => addBitcoinOrder(shopify);
 
   async function observe(invoiceId: string, observation: InvoiceObservation) {
     btcpay.setObservation(invoiceId, observation);
@@ -82,6 +72,16 @@ describe("再発行と無効化", () => {
       newAttemptId: reissued.payment.currentAttempt.id,
       newInvoiceId: reissued.invoice.invoiceId,
     };
+  }
+
+  // getOrder（Admin API）を呼んだ回数を数えるフェイク
+  function countingGetOrder() {
+    const counter = { calls: 0, shopify: Object.create(shopify) as FakeShopifyGateway };
+    counter.shopify.getOrder = (id) => {
+      counter.calls++;
+      return shopify.getOrder(id);
+    };
+    return counter;
   }
 
   const paymentRow = (paymentId: string) =>
@@ -144,33 +144,23 @@ describe("再発行と無効化", () => {
   describe("reissueForExtension", () => {
     it("別のショップの Payment は再発行せず、Admin API も呼ばない", async () => {
       const { shopifyOrderId, paymentId } = await expiredOrder();
-      let getOrderCalls = 0;
-      const counting = Object.create(shopify) as FakeShopifyGateway;
-      counting.getOrder = (id) => {
-        getOrderCalls++;
-        return shopify.getOrder(id);
-      };
+      const counting = countingGetOrder();
 
-      const view = await reissueForExtension({ ...deps, shop: "other-shop.myshopify.com", shopify: counting }, shopifyOrderId);
+      const view = await reissueForExtension({ ...deps, shop: "other-shop.myshopify.com", shopify: counting.shopify }, shopifyOrderId);
 
       expect(view).toEqual({ state: "PREPARING" });
-      expect(getOrderCalls).toBe(0);
+      expect(counting.calls).toBe(0);
       expect(await paymentRow(paymentId)).toMatchObject({ status: "EXPIRED", attempts: [expect.anything()] });
     });
 
     it("再発行1回で、Admin API の注文の取得は1回", async () => {
       const { shopifyOrderId } = await expiredOrder();
-      let getOrderCalls = 0;
-      const counting = Object.create(shopify) as FakeShopifyGateway;
-      counting.getOrder = (id) => {
-        getOrderCalls++;
-        return shopify.getOrder(id);
-      };
+      const counting = countingGetOrder();
 
-      expect(await reissueForExtension({ ...deps, shopify: counting }, shopifyOrderId)).toMatchObject({
+      expect(await reissueForExtension({ ...deps, shopify: counting.shopify }, shopifyOrderId)).toMatchObject({
         state: "AWAITING_PAYMENT",
       });
-      expect(getOrderCalls).toBe(1);
+      expect(counting.calls).toBe(1);
     });
 
     it("Payment はあるが Admin API で注文が見えなければ、再発行せずに PREPARING", async () => {

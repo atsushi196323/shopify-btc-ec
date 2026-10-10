@@ -11,8 +11,7 @@ import { MAX_SYNC_ROUNDS, reviewTag, syncPaymentToShopify } from "../../src/appl
 import type { InvoiceObservation } from "../../src/domain/payment";
 import { FakeBtcpayGateway } from "../helpers/fake-btcpay";
 import { createTestDb } from "../helpers/test-db";
-
-const SHOP = "test-shop.myshopify.com";
+import { addBitcoinOrder, TEST_SHOP } from "../helpers/orders";
 
 // Shopify への反映（design.md 4章「Shopify への反映」、ADR 8 の決定4）。DB は本物の SQLite、BTCPay と Shopify はフェイク
 describe("syncPaymentToShopify", () => {
@@ -51,16 +50,8 @@ describe("syncPaymentToShopify", () => {
 
   // 紐づけ済みの invoice（NEW・AWAITING_PAYMENT）を1つ作る
   async function awaitingPayment() {
-    const shopifyOrderId = `gid://shopify/Order/${randomUUID()}`;
-    shopify.addOrder({
-      shopifyOrderId,
-      paymentGatewayNames: ["Bitcoinで支払う"],
-      financialStatus: "PENDING",
-      cancelled: false,
-      presentmentCurrencyCode: "JPY",
-      outstanding: { amount: "1000.0", currencyCode: "JPY" },
-    });
-    const created = await createInvoiceForOrder({ shop: SHOP, payments, btcpay, shopify }, shopifyOrderId);
+    const shopifyOrderId = addBitcoinOrder(shopify);
+    const created = await createInvoiceForOrder({ shop: TEST_SHOP, payments, btcpay, shopify }, shopifyOrderId);
     if (created.outcome !== "CREATED") throw new Error(`CREATED ではない: ${created.outcome}`);
     return { paymentId: created.payment.paymentId, invoiceId: created.invoice.invoiceId, shopifyOrderId };
   }
@@ -80,7 +71,7 @@ describe("syncPaymentToShopify", () => {
     const handled = await observe(invoiceId, { status: "SETTLED", received: "FULL" });
 
     expect(handled).toMatchObject({ event: { outcome: "APPLIED" }, sync: { outcome: "SYNCED" } });
-    expect(requestedShops).toEqual([SHOP]);
+    expect(requestedShops).toEqual([TEST_SHOP]);
     expect(shopify.markedAsPaid).toEqual([shopifyOrderId]);
     expect(shopify.orderTags(shopifyOrderId)).toEqual([]);
     expect(await paymentRow(paymentId)).toMatchObject({ status: "PAID", shopifySync: "DONE", shopifySyncError: null });
