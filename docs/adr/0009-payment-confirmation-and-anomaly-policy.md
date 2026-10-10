@@ -71,3 +71,28 @@ Greenfield の `POST /invoices/{id}/status`（`Invalid`）で無効化した inv
 ## 結果
 - テスト: シナリオ1〜4。シナリオ2 では、古い invoice への期限後の入金で新しい invoice が無効化されることも確認する。
 - 注文の自動キャンセルは stretch。
+
+## W3 で決めたこと（2026-10-10、無効化と再発行）
+- **無効化は、意図を先に DB に記録してから BTCPay を呼ぶ**（`src/application/invalidate-attempt.ts`）。
+  `invalidatedByUs`・`invalidatedAt` を version 付きで保存し（判定に効くので version を上げる）、commit の後に Greenfield の `POST /invoices/{id}/status`（`Invalid`）を呼ぶ。
+  BTCPay を先に呼ぶと、無効化の直後に届いた入金を、まだ `invalidatedByUs` でない試行への入金（INVALID_PAYMENT）と判定しうる。
+  BTCPay の呼び出しが失敗しても `invalidatedByUs` は残り、試行は NEW のままなので、スイープ（W4）が「UNRESOLVED なのに現在の試行が NEW」として呼び直す。
+- 無効化する試行かどうかは、ドメインの `attemptToInvalidate` で判定する。ワーカーは保存の commit の直後に、無効化 → Shopify への反映の順に呼ぶ。
+  invoice の紐づけ（初回の作成・再発行・孤児の回復）の後にも呼ぶ。再発行の作成中（新しい試行が CREATING）に古い試行へ期限後の入金があると、
+  Payment は先に UNRESOLVED になり、紐づけた時点で初めて「UNRESOLVED なのに現在の試行が NEW」になるため。
+- すでに Invalid の invoice の無効化は 422 になる（regtest の BTCPay 2.4.4 で確認）。アダプタは 422 のとき invoice を取り直し、Invalid なら成功とみなす（冪等）。
+- **検知方法の実装**: アダプタは無効化した invoice（`Invalid` / `Marked`）を取得するときに `payment-methods` も取得し、オンチェーン（`BTC-CHAIN`）の `totalPaid` と `amount` から `received` を決める。
+  BTCPay が二重支払いなどで Invalid にした invoice（`additionalStatus` が `Marked` 以外）は、これまでどおり `additionalStatus` で判定する。
+  金額の比較は10進数の文字列のまま行う（浮動小数点に変換しない）。
+- **再発行**（`reissueInvoice`、design.md 5.4）: Payment が EXPIRED のときだけ受け付ける。
+  - 先に Admin API で注文を確かめ、請求額を取り直す（ADR 4）。invoice を作れない注文（キャンセル済みなど）では、新しい試行を作らない。
+  - 新しい試行の作成・ポインタの付け替え・Payment の CREATING を、version 付きの1つのトランザクションで行う。並列に押されても、勝つのは1つだけ。
+  - commit の後に BTCPay に invoice を作って紐づける（初回の作成と同じ処理）。途中で落ちて CREATING のまま残った試行は、スイープの孤児回復が追いつかせる。
+  - 拡張: `POST /api/extension/reissue`。期限切れの表示に「お支払いリンクを再発行する」ボタンを出し、応答の表示状態で問い合わせを始め直す。
+- テスト:
+  - 単体・アダプタ: `tests/adapter/btcpay/invoice-observation.test.ts`（`totalPaid` からの判定と10進数の比較）、
+    `tests/application/reissue-and-invalidate.test.ts`（並列の再発行で試行は1件、無効化の失敗と呼び直し、新しい試行が入金済みなら無効化しない）
+  - 統合（regtest）: `tests/integration/btcpay/greenfield-client.test.ts`（無効化の冪等性、無効化した invoice への入金が INVALID・FULL）、
+    `tests/integration/scenario-02-03-04-09-anomalies.test.ts` でシナリオ2・3・4・9 を確かめた。
+    シナリオ2では、古い invoice への期限後の入金で新しい invoice が BTCPay で Invalid になり、その後の新しい invoice への入金で DOUBLE_PAYMENT が付くことも確かめた。
+    期限切れを待つシナリオは、テスト用のデコレータ（`tests/helpers/short-expiry-btcpay.ts`）で期限1分の invoice を作り、並行に流す（BTCPay は1分未満の期限を受け付けない）。

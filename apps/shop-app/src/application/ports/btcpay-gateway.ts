@@ -25,6 +25,8 @@ export interface BtcpayGateway {
   getInvoice(invoiceId: string): Promise<BtcpayInvoice>;
   // 孤児の回復で使う（ADR 5）。通常は0件か1件。複数あったときの扱いは呼び出し側が決める
   findInvoicesByAttemptId(attemptId: string): Promise<BtcpayInvoice[]>;
+  // invoice を無効化する（ADR 9）。すでに無効なら何もしない（冪等）
+  invalidateInvoice(invoiceId: string): Promise<void>;
 }
 
 // orderId 欄に試行の id がない invoice（BTCPay の管理画面で手で作ったものなど）。このアプリの試行には結びつかない

@@ -9,6 +9,8 @@ export default async () => {
 };
 
 const API_URL = `${process.env.APP_URL}/api/extension/invoice`;
+// 期限切れのときの「invoice を再発行」（design.md 5.4）。応答は API_URL と同じ表示状態
+const REISSUE_URL = `${process.env.APP_URL}/api/extension/reissue`;
 
 // 拡張 API が返す表示状態（src/application/extension-invoice.ts の ExtensionView）。サーバーに状態を足したら、ここにも足す
 const API_STATES = ["PREPARING", "AWAITING_PAYMENT", "CONFIRMING", "PAID", "EXPIRED", "CONTACT_SHOP", "NOT_APPLICABLE"];
@@ -30,8 +32,24 @@ function Extension() {
   // LOADING: 最初の応答の前 / ERROR: 通信エラー（問い合わせ直し中） / GAVE_UP: 問い合わせをやめた
   // stale: true は、変わりうる状態の表示のまま問い合わせをやめた（最新の状態ではないかもしれない）ことを表す
   const [view, setView] = useState({ state: "LOADING" });
+  // 再発行のたびに増やし、問い合わせ直しの回数を数え直して問い合わせを始め直す
+  const [round, setRound] = useState(0);
+  // REISSUING: 再発行の応答待ち（問い合わせを止める） / REISSUE_FAILED: 再発行に失敗した（もう一度押せる）
+  const [reissue, setReissue] = useState(null);
+  const reissuing = reissue === "REISSUING";
+
+  async function requestReissue() {
+    setReissue("REISSUING");
+    const next = await fetchView(REISSUE_URL);
+    if (next.state === "ERROR") return setReissue("REISSUE_FAILED");
+    setReissue(null);
+    setView(next);
+    setRound((r) => r + 1);
+  }
 
   useEffect(() => {
+    // 再発行の応答待ちの間は問い合わせない。遅れて届いた古い状態（EXPIRED）で、再発行の結果を上書きしないため
+    if (reissuing) return;
     let stopped = false;
     let timer;
     let retries = 0;
@@ -72,9 +90,9 @@ function Extension() {
       stopped = true;
       clearTimeout(timer);
     };
-  }, []);
+  }, [round, reissuing]);
 
-  return <View view={view} />;
+  return <View view={view} reissue={reissue} onReissue={requestReissue} />;
 }
 
 function isLive(state) {
@@ -82,11 +100,11 @@ function isLive(state) {
 }
 
 // 認証失敗の 401 には CORS ヘッダが付かず、通信エラーとして例外になる（ADR 1）。5xx などとあわせて ERROR として問い合わせ直す
-async function fetchView() {
+async function fetchView(url = API_URL) {
   try {
     const shopifyOrderId = shopify.orderConfirmation.value.order.id;
     const token = await shopify.sessionToken.get();
-    const response = await fetch(API_URL, {
+    const response = await fetch(url, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ shopifyOrderId }),
@@ -113,7 +131,7 @@ function isManualPaymentOrder() {
   return (shopify.selectedPaymentOptions?.value ?? []).some((option) => option.type === "manualPayment");
 }
 
-function View({ view }) {
+function View({ view, reissue, onReissue }) {
   switch (view.state) {
     case "AWAITING_PAYMENT":
       return (
@@ -146,7 +164,13 @@ function View({ view }) {
       return (
         <s-banner heading="お支払いの期限が切れました" tone="warning">
           <s-stack gap="base">
-            <s-text>期限までに入金を確認できませんでした。</s-text>
+            <s-text>期限までに入金を確認できませんでした。新しいお支払いリンクを発行できます（金額は発行時のレートで計算し直します）。</s-text>
+            <s-button onClick={onReissue} loading={reissue === "REISSUING"} variant="primary">
+              お支払いリンクを再発行する
+            </s-button>
+            {reissue === "REISSUE_FAILED" && (
+              <s-text tone="critical">再発行できませんでした。時間をおいて、もう一度お試しください。</s-text>
+            )}
             {view.stale && <StaleNotice />}
           </s-stack>
         </s-banner>

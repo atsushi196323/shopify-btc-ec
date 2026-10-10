@@ -55,6 +55,14 @@ export type SaveObservationInput = {
   inboxId: string;
 };
 
+// 判定と保存の間に別の処理が更新していないことを、version で確かめる書き込みの共通の入力
+type VersionedWrite = { paymentId: string; expectedVersion: number };
+
+export type MarkInvalidatedInput = VersionedWrite & { attemptId: string };
+
+// 再発行（design.md 5.4）。新しい試行を CREATING で作り、ポインタを付け替え、Payment を CREATING にする
+export type SaveReissueInput = VersionedWrite & { newAttemptId: string };
+
 // Shopify への反映（design.md 4章「Shopify への反映」）に使う、Payment の現在の様子
 export type PaymentForSync = {
   paymentId: string;
@@ -78,6 +86,10 @@ export interface PaymentRepository {
   loadForAttempt(attemptId: string): Promise<PaymentForAttempt | null>;
   // 判定の結果を version 付きで保存する。saved: false は、読んだ後に別の処理が先に更新した（version が変わっていた）ことを表す
   saveObservation(input: SaveObservationInput): Promise<{ saved: boolean }>;
+  // 無効化の意図（invalidatedByUs・invalidatedAt）を記録する。BTCPay を呼ぶ前に行う（ADR 9）。false は version の競合
+  markInvalidatedByUs(input: MarkInvalidatedInput): Promise<boolean>;
+  // saved: false は version の競合
+  saveReissue(input: SaveReissueInput): Promise<{ saved: boolean; payment: PaymentSnapshot }>;
   loadForSync(paymentId: string): Promise<PaymentForSync | null>;
   // 読んだときの version のまま PENDING なら DONE にし、shopifySyncError を消す。false は、反映中に別の変更が入った（PENDING のまま）
   markSynced(paymentId: string, version: number): Promise<boolean>;

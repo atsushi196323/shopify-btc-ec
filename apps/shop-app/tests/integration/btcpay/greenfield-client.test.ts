@@ -128,6 +128,28 @@ describe("GreenfieldClient（regtest）", () => {
     });
   });
 
+  it("invalidateInvoice は INVALID・入金なしにする。もう一度呼んでも成功する（BTCPay は 422 を返す）", async () => {
+    const invoice = await create();
+
+    await client.invalidateInvoice(invoice.invoiceId);
+    await client.invalidateInvoice(invoice.invoiceId);
+
+    expect((await client.getInvoice(invoice.invoiceId)).observation).toEqual({ status: "INVALID", received: "NONE" });
+  });
+
+  it("無効化した invoice への入金は、payment-methods から読んで INVALID・FULL になる（ADR 9）", async () => {
+    const invoice = await create();
+    const { destination, due } = await paymentMethod(invoice.invoiceId);
+    await client.invalidateInvoice(invoice.invoiceId);
+
+    pay(destination, due);
+
+    expect(await waitFor(invoice.invoiceId, (i) => i.observation.received !== "NONE")).toMatchObject({
+      observation: { status: "INVALID", received: "FULL" },
+    });
+    mineBlocks(1);
+  });
+
   // ポートの外の操作（支払い先の取得）は、テストから Greenfield を直接呼ぶ
   async function greenfield<T>(path: string): Promise<T> {
     const response = await fetch(`${config.baseUrl}/api/v1/stores/${config.storeId}${path}`, {

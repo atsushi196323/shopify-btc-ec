@@ -5,6 +5,7 @@ import { applyObservation } from "../domain/payment";
 import { ForeignInvoiceError, type BtcpayGateway } from "./ports/btcpay-gateway";
 import type { InboxRepository } from "./ports/inbox-repository";
 import type { PaymentRepository } from "./ports/payment-repository";
+import { invalidateAttempt, type InvalidateResult } from "./invalidate-attempt";
 import { syncPaymentToShopify, type ShopifySyncDeps, type ShopifySyncResult } from "./sync-to-shopify";
 
 // 1回の処理で、version の競合による再判定を何回まで行うか
@@ -26,17 +27,30 @@ export type ProcessEventResult =
   | { outcome: "NO_CHANGE" | "IGNORED" | "ALREADY_PROCESSED" | "RETRY" | "FAILED" };
 
 export type HandleEventDeps = ProcessEventDeps & ShopifySyncDeps;
-export type HandleEventResult = { event: ProcessEventResult; sync: ShopifySyncResult | null };
+// 保存の後に行う外部呼び出しの結果。呼ばなかったら null
+export type HandleEventResult = {
+  event: ProcessEventResult;
+  invalidation: InvalidateResult | { outcome: "FAILED"; error: string } | null;
+  sync: ShopifySyncResult | null;
+};
 
-// ワーカーの1件分。保存の commit の直後に、Shopify への反映を1回呼ぶ（design.md 5.3 の 4）。
-// 反映に失敗しても PENDING のまま残り、スイープが追いつかせる。反映の中の DB の例外も、保存済みのイベントの結果と分けて返す
+// ワーカーの1件分。保存の commit の直後に、無効化（ADR 9）と Shopify への反映（design.md 5.3 の 4）を1回ずつ呼ぶ。
+// どちらも失敗したらスイープが追いつかせる。外部呼び出しの例外は、保存済みのイベントの結果と分けて返す
 export async function handleBtcpayEvent(deps: HandleEventDeps, inboxId: string): Promise<HandleEventResult> {
   const event = await processBtcpayEvent(deps, inboxId);
-  if (event.outcome !== "APPLIED" || !event.needsShopifySync) return { event, sync: null };
+  if (event.outcome !== "APPLIED") return { event, invalidation: null, sync: null };
+  const invalidation = event.attemptToInvalidate
+    ? await settle(() => invalidateAttempt(deps, event.attemptToInvalidate!))
+    : null;
+  const sync = event.needsShopifySync ? await settle(() => syncPaymentToShopify(deps, event.paymentId)) : null;
+  return { event, invalidation, sync };
+}
+
+async function settle<T>(call: () => Promise<T>): Promise<T | { outcome: "FAILED"; error: string }> {
   try {
-    return { event, sync: await syncPaymentToShopify(deps, event.paymentId) };
+    return await call();
   } catch (error) {
-    return { event, sync: { outcome: "FAILED", error: error instanceof Error ? error.message : String(error) } };
+    return { outcome: "FAILED", error: error instanceof Error ? error.message : String(error) };
   }
 }
 

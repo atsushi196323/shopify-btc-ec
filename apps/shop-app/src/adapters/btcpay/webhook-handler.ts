@@ -26,8 +26,11 @@ export async function receiveBtcpayWebhook(request: Request, deps: HandleEventDe
   // 重複でも、行が PENDING のまま残っていれば処理する（PENDING でなければワーカーは何もしない）
   const processed = handleBtcpayEvent(deps, inboxId).then(
     (result) => {
+      const invalidation = result.invalidation ? ` / 無効化: ${result.invalidation.outcome}` : "";
       const sync = result.sync ? ` / Shopify: ${result.sync.outcome}` : "";
-      console.log(`btcpay webhook ${event.type} ${event.invoiceId}${duplicate ? "（重複）" : ""}: ${result.event.outcome}${sync}`);
+      console.log(
+        `btcpay webhook ${event.type} ${event.invoiceId}${duplicate ? "（重複）" : ""}: ${result.event.outcome}${invalidation}${sync}`,
+      );
       return result;
     },
     (error: unknown) => {

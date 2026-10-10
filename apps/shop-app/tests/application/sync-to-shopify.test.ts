@@ -136,6 +136,7 @@ describe("syncPaymentToShopify", () => {
 
     expect(handled).toEqual({
       event: expect.objectContaining({ outcome: "APPLIED" }),
+      invalidation: null,
       sync: { outcome: "FAILED", error: "Shopify が一時的に応答しない" },
     });
     // イベントの保存は commit 済み。反映だけが残っている
@@ -231,6 +232,7 @@ describe("syncPaymentToShopify", () => {
 
     expect(await handleBtcpayEvent({ ...deps, payments: brokenPayments }, inboxId)).toEqual({
       event: expect.objectContaining({ outcome: "APPLIED" }),
+      invalidation: null,
       sync: { outcome: "FAILED", error: "SQLITE_BUSY" },
     });
   });

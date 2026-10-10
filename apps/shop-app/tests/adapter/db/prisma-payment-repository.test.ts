@@ -332,4 +332,36 @@ describe("PrismaPaymentRepository", () => {
       });
     });
   });
+
+  describe("markInvalidatedByUs と saveReissue", () => {
+    it("無効化の意図を記録し、version を上げる。version が違えば何もしない", async () => {
+      const { payment } = await reserve();
+      const attemptId = payment.currentAttempt.id;
+      await attach(attemptId);
+
+      expect(await repository.markInvalidatedByUs({ paymentId: payment.paymentId, expectedVersion: 0, attemptId })).toBe(false);
+      expect(await repository.markInvalidatedByUs({ paymentId: payment.paymentId, expectedVersion: 1, attemptId })).toBe(true);
+
+      expect(await prisma.payment.findUniqueOrThrow({ where: { id: payment.paymentId } })).toMatchObject({ version: 2 });
+      expect(await prisma.invoiceAttempt.findUniqueOrThrow({ where: { id: attemptId } })).toMatchObject({
+        invalidatedByUs: true,
+        invalidatedAt: expect.any(Date),
+      });
+    });
+
+    it("再発行は、新しい試行を CREATING で作ってポインタを付け替える。version が違えば何もしない", async () => {
+      const { payment } = await reserve();
+      await attach(payment.currentAttempt.id, { status: "EXPIRED", received: "NONE" });
+      const newAttemptId = randomUUID();
+
+      const stale = await repository.saveReissue({ paymentId: payment.paymentId, expectedVersion: 0, newAttemptId });
+      expect(stale).toMatchObject({ saved: false, payment: { status: "EXPIRED" } });
+
+      const saved = await repository.saveReissue({ paymentId: payment.paymentId, expectedVersion: 1, newAttemptId });
+      expect(saved).toMatchObject({
+        saved: true,
+        payment: { status: "CREATING", version: 2, currentAttempt: { id: newAttemptId, status: "CREATING", btcpayInvoiceId: null } },
+      });
+    });
+  });
 });
