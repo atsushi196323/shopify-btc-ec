@@ -138,6 +138,37 @@ describe("再発行と無効化", () => {
   });
 
   describe("reissueForExtension", () => {
+    it("別のショップの Payment は再発行せず、Admin API も呼ばない", async () => {
+      const { shopifyOrderId, paymentId } = await expiredOrder();
+      let getOrderCalls = 0;
+      const counting = Object.create(shopify) as FakeShopifyGateway;
+      counting.getOrder = (id) => {
+        getOrderCalls++;
+        return shopify.getOrder(id);
+      };
+
+      const view = await reissueForExtension({ ...deps, shop: "other-shop.myshopify.com", shopify: counting }, shopifyOrderId);
+
+      expect(view).toEqual({ state: "PREPARING" });
+      expect(getOrderCalls).toBe(0);
+      expect(await paymentRow(paymentId)).toMatchObject({ status: "EXPIRED", attempts: [expect.anything()] });
+    });
+
+    it("再発行1回で、Admin API の注文の取得は1回", async () => {
+      const { shopifyOrderId } = await expiredOrder();
+      let getOrderCalls = 0;
+      const counting = Object.create(shopify) as FakeShopifyGateway;
+      counting.getOrder = (id) => {
+        getOrderCalls++;
+        return shopify.getOrder(id);
+      };
+
+      expect(await reissueForExtension({ ...deps, shopify: counting }, shopifyOrderId)).toMatchObject({
+        state: "AWAITING_PAYMENT",
+      });
+      expect(getOrderCalls).toBe(1);
+    });
+
     it("新しい checkout link を返す。Admin API で見えない注文は Payment を見ずに PREPARING", async () => {
       const { shopifyOrderId, oldInvoiceId } = await expiredOrder();
 

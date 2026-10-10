@@ -78,7 +78,11 @@ export class PrismaPaymentRepository implements PaymentRepository {
       });
       const attempt = await tx.invoiceAttempt.findUniqueOrThrow({ where: { id: attemptId } });
       if (claimed.count === 0) {
-        return { attached: false, payment: toSnapshot(await findPayment(tx, attempt.paymentId)) };
+        return {
+          attached: false,
+          payment: toSnapshot(await findPayment(tx, attempt.paymentId)),
+          attemptToInvalidate: null,
+        };
       }
 
       const payment = await tx.payment.findUniqueOrThrow({ where: { id: attempt.paymentId }, include: withState });
@@ -105,7 +109,11 @@ export class PrismaPaymentRepository implements PaymentRepository {
       await tx.reviewFlag.createMany({
         data: result.newFlags.map((flag) => ({ id: randomUUID(), paymentId: payment.id, ...flag })),
       });
-      return { attached: true, payment: toSnapshot(await findPayment(tx, payment.id)) };
+      return {
+        attached: true,
+        payment: toSnapshot(await findPayment(tx, payment.id)),
+        attemptToInvalidate: result.attemptToInvalidate,
+      };
     }, TRANSACTION_OPTIONS);
   }
 
@@ -171,19 +179,29 @@ export class PrismaPaymentRepository implements PaymentRepository {
     }, TRANSACTION_OPTIONS);
   }
 
-  async saveReissue({ paymentId, expectedVersion, newAttemptId }: SaveReissueInput) {
+  async saveReissue({ paymentId, expectedVersion, state }: SaveReissueInput) {
+    const next = state.attempts.find((a) => a.id === state.currentAttemptId);
+    if (!next) throw new Error(`再発行の結果に現在の試行 ${state.currentAttemptId} がない`);
     return this.prisma.$transaction(async (tx) => {
       // 最初に書き込んでロックを取る。試行の作成とポインタの付け替えは、同じトランザクションで行う（ADR 7）。
       // status が変わるので、ほかの遷移と同じく Shopify への反映待ちにする（design.md 4章「Shopify への反映」の1）
       const updated = await tx.payment.updateMany({
         where: { id: paymentId, version: expectedVersion },
-        data: { status: "CREATING", version: { increment: 1 }, shopifySync: "PENDING" },
+        data: { status: state.status, version: { increment: 1 }, shopifySync: "PENDING" },
       });
       if (updated.count === 0) return { saved: false, payment: toSnapshot(await findPayment(tx, paymentId)) };
-      await tx.invoiceAttempt.create({ data: { id: newAttemptId, paymentId } });
+      await tx.invoiceAttempt.create({
+        data: {
+          id: next.id,
+          paymentId,
+          status: next.status,
+          invalidatedByUs: next.invalidatedByUs,
+          paymentDetected: next.paymentDetected,
+        },
+      });
       const payment = await tx.payment.update({
         where: { id: paymentId },
-        data: { currentAttemptId: newAttemptId },
+        data: { currentAttemptId: next.id },
         include: withCurrentAttempt,
       });
       return { saved: true, payment: toSnapshot(payment) };
@@ -254,6 +272,7 @@ function toSnapshot(payment: PaymentWithCurrentAttempt): PaymentSnapshot {
   if (!attempt) throw new Error(`Payment ${payment.id} のポインタが NULL`);
   return {
     paymentId: payment.id,
+    shop: payment.shop,
     shopifyOrderId: payment.shopifyOrderId,
     status: payment.status,
     version: payment.version,

@@ -110,6 +110,21 @@ describe("syncPaymentToShopify", () => {
     expect(shopify.orderTags(shopifyOrderId)).toEqual(["btc-review-overpaid"]);
   });
 
+  it.each([
+    ["キャンセル済み", { cancelled: true }],
+    ["返金済み", { financialStatus: "REFUNDED" }],
+    ["取り消し済み", { financialStatus: "VOIDED" }],
+  ])("%s の注文には orderMarkAsPaid を呼ばず、タグだけ付けて DONE にする", async (_label, change) => {
+    const { paymentId, invoiceId, shopifyOrderId } = await awaitingPayment();
+    shopify.addOrder({ ...(await shopify.getOrder(shopifyOrderId))!, ...change });
+
+    expect(await observe(invoiceId, { status: "SETTLED", received: "OVER" })).toMatchObject({ sync: { outcome: "SYNCED" } });
+
+    expect(shopify.markedAsPaid).toEqual([]);
+    expect(shopify.orderTags(shopifyOrderId)).toEqual(["btc-review-overpaid"]);
+    expect(await paymentRow(paymentId)).toMatchObject({ status: "PAID", shopifySync: "DONE" });
+  });
+
   it("PAID でなくフラグもなければ、Shopify は呼ばずに DONE にする", async () => {
     const { paymentId, invoiceId, shopifyOrderId } = await awaitingPayment();
 

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaPaymentRepository } from "../../../src/adapters/db/prisma-payment-repository";
-import { applyObservation, type InvoiceObservation } from "../../../src/domain/payment";
+import { applyObservation, reissue, type InvoiceObservation } from "../../../src/domain/payment";
 import { createTestDb } from "../../helpers/test-db";
 
 // 予約（design.md 3章「作成の順序と不変条件」、ADR 5・7）と、invoice の紐づけ
@@ -42,6 +42,7 @@ describe("PrismaPaymentRepository", () => {
         reserved: true,
         payment: {
           paymentId,
+          shop: "test-shop.myshopify.com",
           shopifyOrderId,
           status: "CREATING",
           version: 0,
@@ -100,6 +101,7 @@ describe("PrismaPaymentRepository", () => {
           version: 1,
           currentAttempt: { id: attemptId, status: "NEW", btcpayInvoiceId },
         },
+        attemptToInvalidate: null,
       });
       // status が変わったので Shopify への反映待ちにする（design.md 4章）
       const row = await prisma.payment.findUniqueOrThrow({ where: { id: payment.paymentId } });
@@ -124,7 +126,7 @@ describe("PrismaPaymentRepository", () => {
 
       const second = await attach(payment.currentAttempt.id);
 
-      expect(second).toEqual({ attached: false, payment: first.payment });
+      expect(second).toEqual({ attached: false, payment: first.payment, attemptToInvalidate: null });
     });
 
     it("並列に紐づけても、勝つのは1つだけ", async () => {
@@ -353,11 +355,16 @@ describe("PrismaPaymentRepository", () => {
       const { payment } = await reserve();
       await attach(payment.currentAttempt.id, { status: "EXPIRED", received: "NONE" });
       const newAttemptId = randomUUID();
+      const loaded = await repository.loadForAttempt(payment.currentAttempt.id);
+      const reissued = reissue(loaded!.state, newAttemptId);
+      if (!reissued.ok) throw new Error("EXPIRED ではない");
+      const save = (expectedVersion: number) =>
+        repository.saveReissue({ paymentId: payment.paymentId, expectedVersion, state: reissued.state });
 
-      const stale = await repository.saveReissue({ paymentId: payment.paymentId, expectedVersion: 0, newAttemptId });
+      const stale = await save(0);
       expect(stale).toMatchObject({ saved: false, payment: { status: "EXPIRED" } });
 
-      const saved = await repository.saveReissue({ paymentId: payment.paymentId, expectedVersion: 1, newAttemptId });
+      const saved = await save(1);
       expect(saved).toMatchObject({
         saved: true,
         payment: { status: "CREATING", version: 2, currentAttempt: { id: newAttemptId, status: "CREATING", btcpayInvoiceId: null } },

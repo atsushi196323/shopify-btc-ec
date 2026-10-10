@@ -37,11 +37,8 @@ export async function invoiceForExtension(deps: InvoiceDeps, shopifyOrderId: str
 }
 
 // 拡張の「invoice を再発行」ボタン（design.md 5.4）。EXPIRED でなければ何もせず、今の表示状態を返す
+// 別のショップの注文は、reissueInvoice が Payment のショップとセッションのショップを比べて断る
 export async function reissueForExtension(deps: InvoiceDeps, shopifyOrderId: string): Promise<ExtensionView> {
-  // invoiceForExtension と同じく、セッショントークンのショップの Admin API で取れる注文だけを扱う
-  const order = await deps.shopify.getOrder(shopifyOrderId);
-  if (!order) return { state: "PREPARING" };
-
   const result = await reissueInvoice(deps, shopifyOrderId);
   switch (result.outcome) {
     case "REISSUED":

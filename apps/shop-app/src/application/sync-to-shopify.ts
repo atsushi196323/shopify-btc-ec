@@ -62,10 +62,14 @@ export function reviewTag(reason: ReviewReason): string {
   return `btc-review-${reason.toLowerCase().replaceAll("_", "-")}`;
 }
 
-// 支払い済みの注文には orderMarkAsPaid を呼ばない。先に displayFinancialStatus を確かめる
+// orderMarkAsPaid を呼ばない注文の状態。支払い済みは反映が済んでいる。返金済み・取り消し済みは支払い済みにできず、
+// 呼ぶと失敗し続けて PENDING のまま残るので、反映を打ち切る（ADR 8）
+const SKIP_MARK_AS_PAID = ["PAID", "REFUNDED", "PARTIALLY_REFUNDED", "VOIDED"];
+
+// 先に注文を確かめ、キャンセル済みの注文と SKIP_MARK_AS_PAID の注文には orderMarkAsPaid を呼ばない
 async function markAsPaid(shopify: ShopifyGateway, shopifyOrderId: string): Promise<void> {
   const order = await shopify.getOrder(shopifyOrderId);
   if (!order) throw new Error(`Shopify の注文 ${shopifyOrderId} がない`);
-  if (order.financialStatus === "PAID") return;
+  if (order.cancelled || SKIP_MARK_AS_PAID.includes(order.financialStatus)) return;
   await shopify.markOrderAsPaid(shopifyOrderId);
 }

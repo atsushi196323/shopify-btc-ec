@@ -6,6 +6,8 @@ import type { ReviewReason } from "../../domain/review-flag";
 
 export type PaymentSnapshot = {
   paymentId: string;
+  // 注文のショップ。拡張から届いた注文が、セッションのショップのものかを確かめるのにも使う
+  shop: string;
   shopifyOrderId: string;
   status: PaymentStatus;
   version: number;
@@ -34,7 +36,8 @@ export type AttachInvoiceInput = {
 };
 
 // attached: false は、試行がすでに CREATING でない（別の処理が先に紐づけた）ことを表す
-export type AttachInvoiceResult = { attached: boolean; payment: PaymentSnapshot };
+// attemptToInvalidate は、紐づけた結果、無効化すべきになった試行（ドメインの判定。紐づけなかったら null）
+export type AttachInvoiceResult = { attached: boolean; payment: PaymentSnapshot; attemptToInvalidate: string | null };
 
 // ワーカーが判定に使う、試行の Payment の現在の様子（design.md 5.3 の 3）
 export type PaymentForAttempt = {
@@ -60,8 +63,8 @@ type VersionedWrite = { paymentId: string; expectedVersion: number };
 
 export type MarkInvalidatedInput = VersionedWrite & { attemptId: string };
 
-// 再発行（design.md 5.4）。新しい試行を CREATING で作り、ポインタを付け替え、Payment を CREATING にする
-export type SaveReissueInput = VersionedWrite & { newAttemptId: string };
+// 再発行（design.md 5.4）。state はドメインの reissue() の結果で、新しい試行（現在の試行）とポインタ・status をそのまま保存する
+export type SaveReissueInput = VersionedWrite & { state: PaymentState };
 
 // Shopify への反映（design.md 4章「Shopify への反映」）に使う、Payment の現在の様子
 export type PaymentForSync = {
