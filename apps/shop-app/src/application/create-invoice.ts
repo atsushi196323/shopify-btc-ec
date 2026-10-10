@@ -8,6 +8,8 @@ import type { AttemptSnapshot, PaymentRepository, PaymentSnapshot } from "./port
 import type { ShopifyGateway } from "./ports/shopify-gateway";
 
 export type InvoiceDeps = {
+  // 注文のショップ。shopify はこのショップで認証済みのもの
+  shop: string;
   payments: PaymentRepository;
   btcpay: BtcpayGateway;
   shopify: ShopifyGateway;
@@ -34,7 +36,12 @@ export async function createInvoiceForOrder(deps: InvoiceDeps, shopifyOrderId: s
   if (!order.payable) return order.rejection;
 
   const newId = deps.newId ?? randomUUID;
-  const reservation = await deps.payments.reserve({ paymentId: newId(), attemptId: newId(), shopifyOrderId });
+  const reservation = await deps.payments.reserve({
+    paymentId: newId(),
+    attemptId: newId(),
+    shop: deps.shop,
+    shopifyOrderId,
+  });
   if (!reservation.reserved) return { outcome: "EXISTING", payment: reservation.payment };
 
   const attemptId = reservation.payment.currentAttempt.id;

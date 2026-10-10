@@ -75,3 +75,29 @@ DB と外部システム（BTCPay、Shopify）を1つのトランザクション
     `tests/adapter/db/prisma-inbox-repository.test.ts`、`tests/application/process-btcpay-event.test.ts`（二重払いを並列に処理して DOUBLE_PAYMENT がちょうど1件。
     version の確認を外すと失敗することを確かめた）
   - 統合: `tests/integration/btcpay-webhook-worker.test.ts`。テストプロセスが port 3000 で Webhook を受け、本物の secret で署名を検証し、入金と1ブロックで PAID まで進む。
+
+## W3 で決めたこと（2026-10-10、Shopify への反映）
+- **Payment に `shop` 列を足した**（設計に足りなかった点）。BTCPay の Webhook とスイープは Shopify からのリクエストではないので、
+  どのショップのオフラインセッション（`unauthenticated.admin(shop)`）で Admin API を呼ぶかを、Payment から決める必要がある。
+  - 予約（`reserve`）のときに、`orders/create` はテンプレートが検証したショップを、拡張 API はセッショントークンの `dest` を入れる。
+  - `shopifyOrderId` の UNIQUE はそのまま。注文の GID はショップをまたいで一意。
+  - 列を足す前の開発用の行は、開発ストア（1店舗）のオフラインセッションのショップで埋めた（マイグレーションの SQL）。
+- 反映は `src/application/sync-to-shopify.ts`。ワーカーの1件分（`handleBtcpayEvent`）が、保存の commit の直後に、
+  `needsShopifySync` のときだけ1回呼ぶ。スイープ（W4）も同じ関数を呼ぶ。
+  - 未対応のフラグから導出したタグを `tagsAdd` で付ける。書式は理由を小文字とハイフンにしたもの（例: `btc-review-late-payment`）。
+    支払い済みにできない注文（キャンセル済みなど）でも異常が Shopify で見えるように、タグを `orderMarkAsPaid` より先に付ける。
+  - PAID なら、`getOrder` で `displayFinancialStatus` を確かめ、PAID でなければ `orderMarkAsPaid` を呼ぶ。
+  - mutation の `userErrors` と、payload が null の結果も失敗として扱う。失敗は `shopifySyncError` に記録し、PENDING のまま残す。すでに DONE なら記録しない。
+  - 同じ Payment の反映は、プロセスの中で順番に流す（Payment ごとの待ち行列）。並行した2つの反映が、どちらも未払いと見て
+    `orderMarkAsPaid` を2回呼ぶのを防ぐ。ワーカーとスイープは同じプロセスで動くので、これで足りる（水平スケールは考慮しない）。
+- DONE にできなかった（version が変わっていた）ときは、読み直して反映し直す（最大3回）。version は試行だけの変更（一部入金の記録など）でも上がるので、
+  読み直さないと、反映することが残っていないのにスイープまで PENDING のまま残る。3回続いたら PENDING のまま残し、スイープに任せる。
+- invoice の紐づけ（CREATING → AWAITING_PAYMENT）でも PENDING になるが、作成の経路では反映を呼ばない。Shopify に反映することがないので、
+  スイープが DONE にするまで PENDING のまま残っても害はない。
+- テスト:
+  - アダプタ: `tests/adapter/shopify/admin-gateway.test.ts`（`orderMarkAsPaid`・`tagsAdd` を保存したスキーマで検証し、結果の型の null 許容をスキーマと照合する）、
+    `tests/adapter/db/prisma-payment-repository.test.ts`（version が変わっていたら DONE にしない）
+  - application: `tests/application/sync-to-shopify.test.ts`（支払い済みの注文には呼ばない、失敗の記録と追いつき、反映中の変更で反映し直す）
+  - 統合: `tests/integration/btcpay-webhook-worker.test.ts` でシナリオ1（PAID → Shopify の注文が支払い済み）とシナリオ5を確かめた。
+    シナリオ5は、BTCPay の Redeliver で `InvoiceSettled` を再送する。再送は新しい `deliveryId` で届くので inbox では落ちないが、
+    状態の判定で NO_CHANGE になり、反映は呼ばれない（`orderMarkAsPaid` は1回のまま）。

@@ -28,7 +28,7 @@ describe("invoice の作成", () => {
   beforeEach(() => {
     btcpay = new FakeBtcpayGateway();
     shopify = new FakeShopifyGateway();
-    deps = { payments: new PrismaPaymentRepository(prisma), btcpay, shopify };
+    deps = { shop: "test-shop.myshopify.com", payments: new PrismaPaymentRepository(prisma), btcpay, shopify };
   });
 
   function addOrder(overrides: Partial<Omit<ShopifyOrder, "shopifyOrderId">> = {}): string {
@@ -168,7 +168,7 @@ describe("invoice の作成", () => {
     it("BTCPay で作った後に紐づけ前で落ちた invoice は、作り直さずに紐づける", async () => {
       const shopifyOrderId = addOrder();
       // 紐づけの前に落ちたことにする: BTCPay には invoice があるが、DB は CREATING のまま
-      const reservation = await deps.payments.reserve({ paymentId: randomUUID(), attemptId: randomUUID(), shopifyOrderId });
+      const reservation = await deps.payments.reserve({ paymentId: randomUUID(), attemptId: randomUUID(), shop: "test-shop.myshopify.com", shopifyOrderId });
       const attemptId = reservation.payment.currentAttempt.id;
       const invoice = await btcpay.createInvoice({ attemptId, shopifyOrderId, amount: "1000.0", currency: "JPY" });
 

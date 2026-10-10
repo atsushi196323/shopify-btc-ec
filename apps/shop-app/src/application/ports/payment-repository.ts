@@ -2,6 +2,7 @@
 // 遷移とフラグの判定は domain と application が行い、リポジトリはロックと保存だけを受け持つ。
 import type { InvoiceAttemptStatus } from "../../domain/invoice-attempt";
 import type { ObservationResult, PaymentState, PaymentStatus } from "../../domain/payment";
+import type { ReviewReason } from "../../domain/review-flag";
 
 export type PaymentSnapshot = {
   paymentId: string;
@@ -19,7 +20,8 @@ export type AttemptSnapshot = {
   btcpayInvoiceId: string | null;
 };
 
-export type ReserveInput = { paymentId: string; attemptId: string; shopifyOrderId: string };
+// shop は注文のショップ（xxx.myshopify.com）。Shopify への反映で、このショップのオフラインセッションを使う
+export type ReserveInput = { paymentId: string; attemptId: string; shop: string; shopifyOrderId: string };
 
 // reserved: false は、同じ shopifyOrderId の Payment がすでにあった（UNIQUE に負けた）ことを表す
 export type ReserveResult = { reserved: boolean; payment: PaymentSnapshot };
@@ -53,6 +55,19 @@ export type SaveObservationInput = {
   inboxId: string;
 };
 
+// Shopify への反映（design.md 4章「Shopify への反映」）に使う、Payment の現在の様子
+export type PaymentForSync = {
+  paymentId: string;
+  shop: string;
+  shopifyOrderId: string;
+  status: PaymentStatus;
+  // 反映が終わったら、この version のままのときだけ DONE にする
+  version: number;
+  shopifySync: "PENDING" | "DONE";
+  // 未対応（resolvedAt なし）のフラグの理由。重複は除く
+  unresolvedReasons: ReviewReason[];
+};
+
 export interface PaymentRepository {
   findByShopifyOrderId(shopifyOrderId: string): Promise<PaymentSnapshot | null>;
   findAttempt(attemptId: string): Promise<AttemptSnapshot | null>;
@@ -63,4 +78,9 @@ export interface PaymentRepository {
   loadForAttempt(attemptId: string): Promise<PaymentForAttempt | null>;
   // 判定の結果を version 付きで保存する。saved: false は、読んだ後に別の処理が先に更新した（version が変わっていた）ことを表す
   saveObservation(input: SaveObservationInput): Promise<{ saved: boolean }>;
+  loadForSync(paymentId: string): Promise<PaymentForSync | null>;
+  // 読んだときの version のまま PENDING なら DONE にし、shopifySyncError を消す。false は、反映中に別の変更が入った（PENDING のまま）
+  markSynced(paymentId: string, version: number): Promise<boolean>;
+  // 反映の失敗を記録する。PENDING のまま残し、スイープに任せる。別の処理が先に DONE にしていたら何もしない
+  recordSyncError(paymentId: string, error: string): Promise<void>;
 }

@@ -4,6 +4,9 @@ import type { ShopifyGateway, ShopifyOrder } from "../../application/ports/shopi
 
 export class FakeShopifyGateway implements ShopifyGateway {
   private readonly orders = new Map<string, ShopifyOrder>();
+  private readonly tags = new Map<string, Set<string>>();
+  // markOrderAsPaid を呼んだ注文。呼んだ回数を確かめるために、同じ注文も重ねて記録する（シナリオ5）
+  readonly markedAsPaid: string[] = [];
 
   addOrder(order: ShopifyOrder): void {
     this.orders.set(order.shopifyOrderId, structuredClone(order));
@@ -12,5 +15,25 @@ export class FakeShopifyGateway implements ShopifyGateway {
   async getOrder(shopifyOrderId: string): Promise<ShopifyOrder | null> {
     const order = this.orders.get(shopifyOrderId);
     return order ? structuredClone(order) : null;
+  }
+
+  // 支払い済みの注文は displayFinancialStatus が PAID になる。支払い済みの注文に呼ぶのは呼び出し側の誤りとして失敗させる
+  async markOrderAsPaid(shopifyOrderId: string): Promise<void> {
+    const order = this.orders.get(shopifyOrderId);
+    if (!order) throw new Error(`注文 ${shopifyOrderId} がない`);
+    this.markedAsPaid.push(shopifyOrderId);
+    if (order.financialStatus === "PAID") throw new Error(`注文 ${shopifyOrderId} はすでに支払い済み`);
+    order.financialStatus = "PAID";
+  }
+
+  async addOrderTags(shopifyOrderId: string, tags: string[]): Promise<void> {
+    if (!this.orders.has(shopifyOrderId)) throw new Error(`注文 ${shopifyOrderId} がない`);
+    const current = this.tags.get(shopifyOrderId) ?? new Set();
+    for (const tag of tags) current.add(tag);
+    this.tags.set(shopifyOrderId, current);
+  }
+
+  orderTags(shopifyOrderId: string): string[] {
+    return [...(this.tags.get(shopifyOrderId) ?? [])].sort();
   }
 }

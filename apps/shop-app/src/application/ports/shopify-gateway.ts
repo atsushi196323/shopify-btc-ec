@@ -17,4 +17,11 @@ export type ShopifyOrder = {
 export interface ShopifyGateway {
   // 注文がなければ null
   getOrder(shopifyOrderId: string): Promise<ShopifyOrder | null>;
+  // 注文を支払い済みにする（orderMarkAsPaid）。すでに支払い済みかの確認は呼び出し側が行う
+  markOrderAsPaid(shopifyOrderId: string): Promise<void>;
+  // タグを付ける（tagsAdd）。付いているタグに対しては何もしない
+  addOrderTags(shopifyOrderId: string, tags: string[]): Promise<void>;
 }
+
+// ショップのオフラインセッションで認証した ShopifyGateway を返す。Shopify からのリクエストの外（BTCPay の Webhook・スイープ）で使う
+export type ShopifyGatewayForShop = (shop: string) => Promise<ShopifyGateway>;

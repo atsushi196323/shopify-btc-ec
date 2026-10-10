@@ -56,7 +56,7 @@ describe("processBtcpayEvent", () => {
       presentmentCurrencyCode: "JPY",
       outstanding: { amount: "1000.0", currencyCode: "JPY" },
     });
-    const created = await createInvoiceForOrder({ payments, btcpay, shopify }, shopifyOrderId);
+    const created = await createInvoiceForOrder({ shop: "test-shop.myshopify.com", payments, btcpay, shopify }, shopifyOrderId);
     if (created.outcome !== "CREATED") throw new Error(`CREATED ではない: ${created.outcome}`);
     return {
       paymentId: created.payment.paymentId,
@@ -168,7 +168,7 @@ describe("processBtcpayEvent", () => {
 
   it("試行に invoice がまだ紐づいていなければ、PENDING のまま残して後で処理する", async () => {
     const shopifyOrderId = randomUUID();
-    const reservation = await payments.reserve({ paymentId: randomUUID(), attemptId: randomUUID(), shopifyOrderId });
+    const reservation = await payments.reserve({ paymentId: randomUUID(), attemptId: randomUUID(), shop: "test-shop.myshopify.com", shopifyOrderId });
     const attemptId = reservation.payment.currentAttempt.id;
     const invoice = await btcpay.createInvoice({ attemptId, shopifyOrderId, amount: "1000.0", currency: "JPY" });
     const inboxId = await receive(invoice.invoiceId);

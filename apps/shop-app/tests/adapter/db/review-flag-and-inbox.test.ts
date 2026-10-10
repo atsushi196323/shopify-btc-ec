@@ -24,7 +24,7 @@ describe("ReviewFlag と Inbox の制約", () => {
     const paymentId = randomUUID();
     const attemptId = randomUUID();
     await prisma.$transaction(async (tx) => {
-      await tx.payment.create({ data: { id: paymentId, shopifyOrderId: randomUUID() } });
+      await tx.payment.create({ data: { id: paymentId, shop: "test-shop.myshopify.com", shopifyOrderId: randomUUID() } });
       await tx.invoiceAttempt.create({ data: { id: attemptId, paymentId } });
       await tx.payment.update({ where: { id: paymentId }, data: { currentAttemptId: attemptId } });
     });

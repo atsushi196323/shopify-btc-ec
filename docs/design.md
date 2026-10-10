@@ -78,6 +78,7 @@ docs/adr/  docs/diagrams/
 ```
 Payment
   id
+  shop               注文のショップ（xxx.myshopify.com）。Shopify への反映に使う（ADR 8）
   shopifyOrderId     UNIQUE
   status             CREATING | AWAITING_PAYMENT | CONFIRMING | PAID | EXPIRED | UNRESOLVED
   version            楽観ロック用（状態・フラグ・ポインタを変えるたびに +1）

@@ -18,7 +18,7 @@ describe("Payment.currentAttemptId の複合外部キー", () => {
 
   it("ポインタが NULL の Payment は作れる", async () => {
     const payment = await prisma.payment.create({
-      data: { id: randomUUID(), shopifyOrderId: randomUUID() },
+      data: { id: randomUUID(), shop: "test-shop.myshopify.com", shopifyOrderId: randomUUID() },
     });
 
     expect(payment.currentAttemptId).toBeNull();
@@ -29,7 +29,7 @@ describe("Payment.currentAttemptId の複合外部キー", () => {
     const attemptId = randomUUID();
 
     await prisma.$transaction(async (tx) => {
-      await tx.payment.create({ data: { id: paymentId, shopifyOrderId: randomUUID() } });
+      await tx.payment.create({ data: { id: paymentId, shop: "test-shop.myshopify.com", shopifyOrderId: randomUUID() } });
       await tx.invoiceAttempt.create({ data: { id: attemptId, paymentId } });
       await tx.payment.update({ where: { id: paymentId }, data: { currentAttemptId: attemptId } });
     });
@@ -43,8 +43,8 @@ describe("Payment.currentAttemptId の複合外部キー", () => {
     const [pragma] = await prisma.$queryRaw<{ foreign_keys: bigint }[]>`PRAGMA foreign_keys`;
     expect(Number(pragma.foreign_keys)).toBe(1);
 
-    const paymentA = await prisma.payment.create({ data: { id: randomUUID(), shopifyOrderId: randomUUID() } });
-    const paymentB = await prisma.payment.create({ data: { id: randomUUID(), shopifyOrderId: randomUUID() } });
+    const paymentA = await prisma.payment.create({ data: { id: randomUUID(), shop: "test-shop.myshopify.com", shopifyOrderId: randomUUID() } });
+    const paymentB = await prisma.payment.create({ data: { id: randomUUID(), shop: "test-shop.myshopify.com", shopifyOrderId: randomUUID() } });
     const attemptOfB = await prisma.invoiceAttempt.create({ data: { id: randomUUID(), paymentId: paymentB.id } });
 
     const pointToOthersAttempt = prisma.payment.update({

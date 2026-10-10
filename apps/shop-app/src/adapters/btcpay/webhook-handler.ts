@@ -1,12 +1,12 @@
 // BTCPay の Webhook の受信（design.md 5.3 の 1・2、ADR 8）。ルート（app/routes/webhooks.btcpay.tsx）と統合テストの両方から使う。
 // 署名を検証して inbox に保存し、すぐに 200 を返す。処理はワーカーに渡し、応答を待たせない
-import { processBtcpayEvent, type ProcessEventDeps, type ProcessEventResult } from "../../application/process-btcpay-event";
+import { handleBtcpayEvent, type HandleEventDeps, type HandleEventResult } from "../../application/process-btcpay-event";
 import { parseBtcpayWebhookEvent, verifyBtcpaySignature } from "./webhook";
 
 // processed はワーカーの処理が終わったら解決する（統合テストが待つため。ルートは待たない）
-export type WebhookReceipt = { response: Response; processed: Promise<ProcessEventResult | null> };
+export type WebhookReceipt = { response: Response; processed: Promise<HandleEventResult | null> };
 
-export async function receiveBtcpayWebhook(request: Request, deps: ProcessEventDeps, secret: string): Promise<WebhookReceipt> {
+export async function receiveBtcpayWebhook(request: Request, deps: HandleEventDeps, secret: string): Promise<WebhookReceipt> {
   // 署名は生のボディに対して計算されているので、パースする前に検証する
   const body = await request.text();
   if (!verifyBtcpaySignature(body, request.headers.get("BTCPay-Sig"), secret)) {
@@ -24,9 +24,10 @@ export async function receiveBtcpayWebhook(request: Request, deps: ProcessEventD
     invoiceId: event.invoiceId,
   });
   // 重複でも、行が PENDING のまま残っていれば処理する（PENDING でなければワーカーは何もしない）
-  const processed = processBtcpayEvent(deps, inboxId).then(
+  const processed = handleBtcpayEvent(deps, inboxId).then(
     (result) => {
-      console.log(`btcpay webhook ${event.type} ${event.invoiceId}${duplicate ? "（重複）" : ""}: ${result.outcome}`);
+      const sync = result.sync ? ` / Shopify: ${result.sync.outcome}` : "";
+      console.log(`btcpay webhook ${event.type} ${event.invoiceId}${duplicate ? "（重複）" : ""}: ${result.event.outcome}${sync}`);
       return result;
     },
     (error: unknown) => {
