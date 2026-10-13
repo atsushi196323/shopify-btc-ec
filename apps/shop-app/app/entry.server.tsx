@@ -5,8 +5,12 @@ import { createReadableStreamFromReadable } from "@react-router/node";
 import { type EntryContext } from "react-router";
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
+import { startSweep } from "./sweep.server";
 
 export const streamTimeout = 5000;
+
+// サーバーのエントリが読み込まれたときに、スイープの定期実行を始める（design.md 5.5）
+startSweep();
 
 export default async function handleRequest(
   request: Request,

@@ -105,3 +105,24 @@ DB と外部システム（BTCPay、Shopify）を1つのトランザクション
   - 統合: `tests/integration/btcpay-webhook-worker.test.ts` でシナリオ1（PAID → Shopify の注文が支払い済み）とシナリオ5を確かめた。
     シナリオ5は、BTCPay の Redeliver で `InvoiceSettled` を再送する。再送は新しい `deliveryId` で届くので inbox では落ちないが、
     状態の判定で NO_CHANGE になり、反映は呼ばれない（`orderMarkAsPaid` は1回のまま）。
+
+## W4 で決めたこと（2026-10-12、スイープ）
+- スイープは `src/application/sweep.ts` の `runSweep`。design.md 5.5 の6段（孤児の回復 → 照合 → 無効化のリトライ → 無効化した試行の監視 → inbox の再処理 → Shopify への反映）を、この順に1回ずつ流す。
+  順番に意味がある。前の段で保存した変更（照合で PAID・UNRESOLVED になったなど）を、同じ回の後の段（無効化・反映）が拾う。
+- 各段は、対象をリポジトリのクエリで探し、既存の冪等な処理（`recoverCreatingAttempt`・`invalidateAttempt`・`handleBtcpayEvent`・`syncPaymentToShopify`）を1件ずつ呼ぶだけにした。
+  1件の失敗（例外）は結果に ERROR として残し、残りの件は続ける。次の回で呼び直す。
+- 照合（2・4）は、ワーカーの判定と保存（`apply`）を inbox なしで呼ぶ `reconcileInvoice` にした。そのために `saveObservation` の `inboxId` を NULL にできるようにした。
+  照合のたびに inbox の行を作ると、変わるものがない行が回ごとに増えるため。照合では、無効化と反映をその場では呼ばず、後の段に任せる。
+- 起動は `app/sweep.server.ts`。サーバーのエントリ（`app/entry.server.tsx`）が読み込まれたときに、プロセスの中で 30 秒ごとに回す。
+  前の回が終わってから次の回を予約するので、回は重ならない。開発サーバーがモジュールを読み直しても二重に起動しないよう、プロセスで1つのフラグを持つ。
+  依存は回ごとに組み立て、BTCPay の設定を毎回読む（`invoiceDeps` と同じ）。ログは NO_CHANGE 以外の結果があった段だけに出す。
+  本番（`react-router-serve`）はビルドを起動時に読み込むので起動と同時に始まるが、開発サーバー（Vite）では最初のリクエストまで始まらない（開発時だけの制約として受け入れる）。
+- inbox の再処理は、受信か最後の失敗から 30 秒（`inboxRetryAfterMs`）経った行だけにした（2026-10-12 のレビューで追加）。受信の直後にワーカーが処理している行と重なると、
+  紐づけ前のイベントの失敗を両方が記録し、10回の上限に約2倍の速さで達するため。
+- レビューで挙がったが、MVP では手を入れないこと: 照合は NEW・PROCESSING の invoice を回ごとに1件ずつ取り直す（件数に比例して回が長くなる）。
+  スイープのクエリには件数の上限がなく、`invalidatedByUs`・`invalidatedAt` に索引もない。ポートフォリオの規模（数十件）では問題にならない。
+- テスト:
+  - application: `tests/application/sweep.test.ts`（6段それぞれ、閾値より新しい孤児には触れない、1件の失敗で止まらない、監視期間を過ぎたら照合しない）
+  - 統合（regtest）: `tests/integration/scenario-06-sweep-without-webhooks.test.ts` でシナリオ6を確かめた。テストの Webhook の受け口が配信を捨て（200 を返す。
+    失敗を返すと BTCPay が後続の配信を止めるため）、入金と1ブロックの後に BTCPay で Settled になっても、アプリは支払い待ちのまま。
+    スイープを1回回すと照合で PAID になり、同じ回の反映で Shopify の注文が支払い済みになる。もう一度回しても Shopify の呼び出しは増えない。

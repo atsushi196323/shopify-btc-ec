@@ -77,3 +77,15 @@ BTCPay にだけ invoice が残る（孤児）。
   例外の注入はシナリオ8（W4）で加える。
 - 結果: DB の Payment と試行はどちらも1件、BTCPay への作成依頼は1回、この注文の invoice（`metadata.shopifyOrderId` で絞る）も1件。
   勝った1件以外の19件は CREATING を読み、Webhook は EXISTING、拡張は「準備中」を返した。作成後の問い合わせは同じ checkout link を返す。
+
+## W4 で決めたこと（2026-10-12、孤児の回復とシナリオ8）
+- 「一定時間」は **60 秒**（`DEFAULT_SWEEP_SETTINGS.orphanAfterMs`）。BTCPay の呼び出しの上限（10 秒）より十分長いので、作成中の呼び出しとスイープの作り直しは重ならない。
+  スイープは 30 秒ごとなので、CREATING のまま残った試行は、作成から 60〜90 秒ほどで回復する。
+- **拡張の待ち時間を、回復にかかる時間より長くした**（2026-10-12 の E2E で見つけた）。Docker を止めていて BTCPay に届かず、予約の後で作成が失敗した注文で、
+  拡張が「お支払いの準備をしています」のまま約1分で問い合わせをやめていた。これまでは回復の仕組みがなく、待っても進まなかった。
+  拡張は最初の約1分を 3 秒ごと、その後は 10 秒ごとに問い合わせ、合計で約4分待つ。1分を過ぎたら「時間がかかっています」と出す。
+  それでも準備ができなければ、これまでどおり「再表示してください」と出す。
+- テスト: `tests/integration/scenario-08-crash-recovery.test.ts` でシナリオ8を確かめた。テスト用デコレータ（`tests/helpers/btcpay-decorator.ts` の `afterCreate`）で、
+  BTCPay で invoice を作った後・DB の更新の前に例外を注入する。初回の作成と再発行のどちらでも、試行は CREATING のまま残り、スイープの孤児回復が
+  `orderId` の検索で同じ invoice を見つけて紐づける（作成依頼は1回のまま、BTCPay のこの試行の invoice も1件）。その invoice に支払うと PAID になる。
+  作成の後に落ちた invoice の `InvoiceCreated` は、紐づけの前に届いて inbox に PENDING のまま残り、スイープの inbox の再処理が DONE にする。

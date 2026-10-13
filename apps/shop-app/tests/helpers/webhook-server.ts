@@ -10,15 +10,24 @@ export type WebhookServer = {
   received: { event: BtcpayWebhookEvent | null; result: HandleEventResult | null }[];
   // 401 で拒んだ配信の数
   rejected: number;
+  // true の間は、届いた配信を処理せずに捨てる（Webhook の遮断。シナリオ6）。捨てた配信の数は dropped に入る。
+  // 応答は 200 にする。失敗を返すと、BTCPay は再送の待ちが明けるまで後続の配信を止め、ほかのテストに響く（ADR 8）
+  blocked: boolean;
+  dropped: number;
   close: () => Promise<void>;
 };
 
 export async function startWebhookServer(deps: HandleEventDeps, secret: string, port = 3000): Promise<WebhookServer> {
-  const state: WebhookServer = { received: [], rejected: 0, close: async () => {} };
+  const state: WebhookServer = { received: [], rejected: 0, blocked: false, dropped: 0, close: async () => {} };
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on("data", (chunk: Buffer) => chunks.push(chunk));
     req.on("end", async () => {
+      if (state.blocked) {
+        state.dropped++;
+        res.writeHead(200).end();
+        return;
+      }
       const body = Buffer.concat(chunks);
       const request = new Request(`http://localhost:${port}${req.url}`, {
         method: req.method,

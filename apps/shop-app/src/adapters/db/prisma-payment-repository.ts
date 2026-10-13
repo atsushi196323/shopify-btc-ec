@@ -5,7 +5,9 @@ import type {
   AttachInvoiceInput,
   AttachInvoiceResult,
   AttemptSnapshot,
+  InvoiceToReconcile,
   MarkInvalidatedInput,
+  OrphanAttempt,
   PaymentForAttempt,
   PaymentForSync,
   PaymentRepository,
@@ -118,7 +120,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
     try {
       await this.prisma.$transaction(async (tx) => {
         if (!(await writeObservation(tx, paymentId, expectedVersion, attemptId, result))) throw new VersionConflict();
-        await tx.inbox.update({ where: { id: inboxId }, data: { status: "DONE" } });
+        if (inboxId) await tx.inbox.update({ where: { id: inboxId }, data: { status: "DONE" } });
       }, TRANSACTION_OPTIONS);
       return { saved: true };
     } catch (error) {
@@ -206,6 +208,52 @@ export class PrismaPaymentRepository implements PaymentRepository {
       data: { shopifySyncError: error },
     });
   }
+
+  async findOrphanAttempts(createdBefore: Date): Promise<OrphanAttempt[]> {
+    const attempts = await this.prisma.invoiceAttempt.findMany({
+      where: { status: "CREATING", btcpayInvoiceId: null, createdAt: { lte: createdBefore } },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, payment: { select: { shop: true } } },
+    });
+    return attempts.map((attempt) => ({ attemptId: attempt.id, shop: attempt.payment.shop }));
+  }
+
+  async findUnsettledInvoices(): Promise<InvoiceToReconcile[]> {
+    return toReconcile(
+      await this.prisma.invoiceAttempt.findMany({
+        where: { status: { in: ["NEW", "PROCESSING"] }, btcpayInvoiceId: { not: null } },
+        orderBy: { createdAt: "asc" },
+      }),
+    );
+  }
+
+  async findAttemptsToInvalidate(): Promise<string[]> {
+    // 現在の試行（ポインタが指す試行）だけを見る。ドメインの attemptToInvalidate と同じ条件
+    const payments = await this.prisma.payment.findMany({
+      where: { status: "UNRESOLVED", currentAttempt: { status: "NEW" } },
+      orderBy: { createdAt: "asc" },
+      select: { currentAttemptId: true },
+    });
+    return payments.flatMap((payment) => (payment.currentAttemptId ? [payment.currentAttemptId] : []));
+  }
+
+  async findInvalidatedInvoices(invalidatedSince: Date): Promise<InvoiceToReconcile[]> {
+    return toReconcile(
+      await this.prisma.invoiceAttempt.findMany({
+        where: { invalidatedByUs: true, invalidatedAt: { gte: invalidatedSince }, btcpayInvoiceId: { not: null } },
+        orderBy: { invalidatedAt: "asc" },
+      }),
+    );
+  }
+
+  async findPendingSync(): Promise<string[]> {
+    const payments = await this.prisma.payment.findMany({
+      where: { shopifySync: "PENDING" },
+      orderBy: { updatedAt: "asc" },
+      select: { id: true },
+    });
+    return payments.map((payment) => payment.id);
+  }
 }
 
 // 判定の結果を保存する。最初の書き込み（Payment の version 付きの更新）でロックを取る（attachInvoice のコメントと同じ理由）。
@@ -237,6 +285,11 @@ async function writeObservation(
     data: result.newFlags.map((flag) => ({ id: randomUUID(), paymentId, ...flag })),
   });
   return true;
+}
+
+// btcpayInvoiceId が NULL でない試行だけを渡す（クエリの条件で絞っている）
+function toReconcile(attempts: { id: string; btcpayInvoiceId: string | null }[]): InvoiceToReconcile[] {
+  return attempts.flatMap((a) => (a.btcpayInvoiceId ? [{ attemptId: a.id, btcpayInvoiceId: a.btcpayInvoiceId }] : []));
 }
 
 function toPaymentState(payment: PaymentWithState): PaymentState {
