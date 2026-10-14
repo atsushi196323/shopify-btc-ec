@@ -54,8 +54,8 @@ export type SaveObservationInput = {
   expectedVersion: number;
   attemptId: string;
   result: ObservationResult;
-  // 同じ commit で DONE にする inbox の行（ADR 8 の決定4）
-  inboxId: string;
+  // 同じ commit で DONE にする inbox の行（ADR 8 の決定4）。スイープの照合（inbox を通さない）では null
+  inboxId: string | null;
 };
 
 // 判定と保存の間に別の処理が更新していないことを、version で確かめる書き込みの共通の入力
@@ -80,6 +80,12 @@ export type PaymentForSync = {
   unresolvedReasons: ReviewReason[];
 };
 
+// スイープの孤児回復（design.md 5.5 の 1）の対象。shop は回復で注文を確かめ直すときに使う
+export type OrphanAttempt = { attemptId: string; shop: string };
+
+// スイープの照合（design.md 5.5 の 2・4）の対象
+export type InvoiceToReconcile = { attemptId: string; btcpayInvoiceId: string };
+
 export interface PaymentRepository {
   findByShopifyOrderId(shopifyOrderId: string): Promise<PaymentSnapshot | null>;
   findAttempt(attemptId: string): Promise<AttemptSnapshot | null>;
@@ -99,4 +105,16 @@ export interface PaymentRepository {
   markSynced(paymentId: string, version: number): Promise<boolean>;
   // 反映の失敗を記録する。PENDING のまま残し、スイープに任せる。別の処理が先に DONE にしていたら何もしない
   recordSyncError(paymentId: string, error: string): Promise<void>;
+
+  // 以下はスイープ（design.md 5.5）が対象を探すクエリ。古いものから返す
+  // CREATING のまま（invoice が紐づかないまま）createdBefore まで（その時刻を含む）に作られた試行
+  findOrphanAttempts(createdBefore: Date): Promise<OrphanAttempt[]>;
+  // 終端でない（NEW・PROCESSING の）、invoice が紐づいた試行
+  findUnsettledInvoices(): Promise<InvoiceToReconcile[]>;
+  // Payment が UNRESOLVED なのに、現在の試行が NEW のまま（無効化が済んでいない）の試行の id
+  findAttemptsToInvalidate(): Promise<string[]>;
+  // invalidatedSince 以降に、自分で無効化した試行（ADR 9 の監視期間）
+  findInvalidatedInvoices(invalidatedSince: Date): Promise<InvoiceToReconcile[]>;
+  // shopifySync = PENDING の Payment の id
+  findPendingSync(): Promise<string[]>;
 }

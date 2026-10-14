@@ -15,9 +15,13 @@ const REISSUE_URL = `${process.env.APP_URL}/api/extension/reissue`;
 // 拡張 API が返す表示状態（src/application/extension-invoice.ts の ExtensionView）。サーバーに状態を足したら、ここにも足す
 const API_STATES = ["PREPARING", "AWAITING_PAYMENT", "CONFIRMING", "PAID", "EXPIRED", "CONTACT_SHOP", "NOT_APPLICABLE"];
 
-// 作成中・通信エラーのときは短い間隔で問い合わせ直す。存在しない注文には PREPARING が返り続けるので、続けて失敗できる回数に上限を設ける
+// 作成中・通信エラーのときは問い合わせ直す。存在しない注文には PREPARING が返り続けるので、続けて失敗できる回数に上限を設ける。
+// 最初の約1分は短い間隔で、その後は間隔を広げて約4分まで待つ。BTCPay の呼び出しに失敗して作成中のまま残った invoice は、
+// スイープの孤児回復（作成から60秒後、30秒ごと。src/application/sweep.ts）が作り直すので、それより長く待つ（ADR 5）
 const RETRY_INTERVAL_MS = 3_000;
-const MAX_RETRIES = 20;
+const FAST_RETRIES = 20;
+const SLOW_RETRY_INTERVAL_MS = 10_000;
+const MAX_RETRIES = 38;
 // まだ変わりうる状態（LIVE_STATES）のときは、変化を拾うために間隔をあけて問い合わせ直す（同じ状態のまま約30分で止める）。
 // 問い合わせのたびにサーバーが Admin API と BTCPay を呼ぶので、間隔は長めに取る
 const REFRESH_INTERVAL_MS = 30_000;
@@ -66,11 +70,14 @@ function Extension() {
         // 支払いリンクなどをすでに表示していれば、一時的な失敗でそれを消さない。
         // その場合は上流（Admin API・BTCPay）が失敗している可能性が高いので、間隔も短くしない
         const showing = isLive(lastState);
+        const slow = retries > FAST_RETRIES;
         setView((current) => {
           if (isLive(current.state)) return givingUp ? { ...current, stale: true } : current;
-          return givingUp ? { state: "GAVE_UP" } : next;
+          return givingUp ? { state: "GAVE_UP" } : { ...next, slow };
         });
-        if (!givingUp) timer = setTimeout(poll, showing ? REFRESH_INTERVAL_MS : RETRY_INTERVAL_MS);
+        if (!givingUp) {
+          timer = setTimeout(poll, showing ? REFRESH_INTERVAL_MS : slow ? SLOW_RETRY_INTERVAL_MS : RETRY_INTERVAL_MS);
+        }
         return;
       }
 
@@ -182,7 +189,13 @@ function View({ view, reissue, onReissue }) {
         </s-banner>
       );
     case "PREPARING":
-      return isManualPaymentOrder() ? <Waiting text="お支払いの準備をしています。" /> : null;
+      if (!isManualPaymentOrder()) return null;
+      // slow: 短い間隔の問い合わせでは準備が終わらなかった（BTCPay の一時的な失敗からの回復を待っている）
+      return (
+        <Waiting
+          text={view.slow ? "お支払いの準備に時間がかかっています。このままお待ちください。" : "お支払いの準備をしています。"}
+        />
+      );
     case "ERROR":
       return isManualPaymentOrder() ? <Waiting text="お支払いの情報を取得できません。接続を再試行しています。" /> : null;
     case "GAVE_UP":

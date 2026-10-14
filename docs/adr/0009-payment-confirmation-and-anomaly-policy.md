@@ -98,3 +98,11 @@ Greenfield の `POST /invoices/{id}/status`（`Invalid`）で無効化した inv
     `tests/integration/scenario-02-03-04-09-anomalies.test.ts` でシナリオ2・3・4・9 を確かめた。
     シナリオ2では、古い invoice への期限後の入金で新しい invoice が BTCPay で Invalid になり、その後の新しい invoice への入金で DOUBLE_PAYMENT が付くことも確かめた。
     期限切れを待つシナリオは、テスト用のデコレータ（`tests/helpers/short-expiry-btcpay.ts`）で期限1分の invoice を作り、並行に流す（BTCPay は1分未満の期限を受け付けない）。
+
+## W4 で決めたこと（2026-10-12、スイープの無効化と監視）
+- 監視期間は **600 秒**（`DEFAULT_SWEEP_SETTINGS.invalidatedWatchMs`）。無効化の時刻から数える。BTCPay が入金を拾うのは invoice の作成から
+  期限（ストアの `invoiceExpiration` 180 秒）+ `monitoringExpiration`（300 秒）までで、無効化は作成より後なので、600 秒あれば BTCPay が入金を拾える間は必ず照合する。
+  ストアの期限や監視の設定を延ばしたら、この値も延ばす（2026-10-12 のレビューで、この結びつきを明記した）。
+- 無効化のリトライ（design.md 5.5 の 3）は、「Payment が UNRESOLVED で、ポインタが指す試行が NEW」をクエリで探し、`invalidateAttempt` を呼び直す。
+  無効化した試行は同じ回の監視（5.5 の 4）で照合されるので、BTCPay で Invalid になったことはその回のうちに試行に写る（INVALID になれば、次の回からは無効化の対象から外れる）。
+- テスト: `tests/application/sweep.test.ts`（無効化の失敗からのリトライ、監視期間の間の入金で DOUBLE_PAYMENT、監視期間を過ぎたら照合しない）。

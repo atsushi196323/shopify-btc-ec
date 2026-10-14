@@ -14,4 +14,6 @@ export interface InboxRepository {
   markDone(inboxId: string): Promise<void>;
   // 再処理の回数を1つ増やし、エラーを記録する。合計が maxAttempts に達したら FAILED にする。戻り値は記録した後の状態
   recordFailure(inboxId: string, error: string, maxAttempts: number): Promise<InboxStatus>;
+  // updatedBefore まで（その時刻を含む）に受信したか最後に失敗した、PENDING の行の id。受信の古いものから返す（スイープの再処理。design.md 5.5 の 5）
+  findPending(updatedBefore: Date): Promise<string[]>;
 }

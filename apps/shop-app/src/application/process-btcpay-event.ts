@@ -20,7 +20,8 @@ export type ProcessEventDeps = {
 
 // APPLIED: 試行・状態・フラグのどれかを保存した / NO_CHANGE: 判定の結果、変わるものがなかった
 // IGNORED: このアプリの試行に紐づかない invoice（orderId 欄がない・試行に当たらない invoice、紐づけに負けた invoice。ADR 5）
-// ALREADY_PROCESSED: inbox の行が PENDING でない / RETRY: PENDING のまま残した / FAILED: 回数の上限に達した
+// ALREADY_PROCESSED: inbox の行が PENDING でない / RETRY: PENDING のまま残した（スイープの照合では、競合が続いて保存しなかった）
+// FAILED: 回数の上限に達した
 export type ProcessEventResult =
   | { outcome: "APPLIED"; paymentId: string; needsShopifySync: boolean; attemptToInvalidate: string | null }
   | { outcome: "NO_CHANGE" | "IGNORED" | "ALREADY_PROCESSED" | "RETRY" | "FAILED" };
@@ -60,7 +61,7 @@ export async function processBtcpayEvent(deps: ProcessEventDeps, inboxId: string
   // 失敗の記録は try の外で行う。記録自体が失敗したときに、catch がもう一度記録しないようにする
   let failure: string;
   try {
-    const processed = await apply(deps, inboxId, event.invoiceId);
+    const processed = await apply(deps, event.invoiceId, { inbox: deps.inbox, inboxId });
     if (processed) return processed;
     failure = `version の競合が ${MAX_CONFLICT_RETRIES} 回続いた`;
   } catch (error) {
@@ -83,15 +84,33 @@ export async function processBtcpayEvent(deps: ProcessEventDeps, inboxId: string
   }
 }
 
+// スイープの照合（design.md 5.5 の 2・4）。inbox を通さずに invoice の最新状態を取り直し、ワーカーと同じ判定と保存を行う。
+// 無効化と Shopify への反映は、スイープのあとの段（5.5 の 3・6）が追いつかせるので、ここでは呼ばない
+export async function reconcileInvoice(deps: Omit<ProcessEventDeps, "inbox">, invoiceId: string): Promise<ProcessEventResult> {
+  try {
+    return (await apply(deps, invoiceId, null)) ?? { outcome: "RETRY" };
+  } catch (error) {
+    if (error instanceof ForeignInvoiceError) return { outcome: "IGNORED" };
+    throw error;
+  }
+}
+
+// 処理の元になった inbox の行。スイープの照合では null
+type Source = { inbox: InboxRepository; inboxId: string } | null;
+
 // 判定して保存する。version の競合が上限まで続いたら null
-async function apply(deps: ProcessEventDeps, inboxId: string, invoiceId: string): Promise<ProcessEventResult | null> {
+async function apply(
+  deps: Omit<ProcessEventDeps, "inbox">,
+  invoiceId: string,
+  source: Source,
+): Promise<ProcessEventResult | null> {
   // トランザクションの外で取り直す。古い状態を取っても、試行は前にしか進まないので害はない（ADR 8 の決定2）
   const invoice = await deps.btcpay.getInvoice(invoiceId);
 
   for (let i = 0; i < MAX_CONFLICT_RETRIES; i++) {
     const loaded = await deps.payments.loadForAttempt(invoice.attemptId);
     if (!loaded || (loaded.btcpayInvoiceId !== null && loaded.btcpayInvoiceId !== invoice.invoiceId)) {
-      await deps.inbox.markDone(inboxId);
+      await source?.inbox.markDone(source.inboxId);
       return { outcome: "IGNORED" };
     }
     // 作成の直後に届いたイベント。紐づけ（作成した呼び出しか、スイープの孤児回復）が済んでから処理する
@@ -101,7 +120,7 @@ async function apply(deps: ProcessEventDeps, inboxId: string, invoiceId: string)
 
     const result = applyObservation(loaded.state, invoice.attemptId, invoice.observation);
     if (!result.attemptChanged && !result.needsShopifySync) {
-      await deps.inbox.markDone(inboxId);
+      await source?.inbox.markDone(source.inboxId);
       return { outcome: "NO_CHANGE" };
     }
     const { saved } = await deps.payments.saveObservation({
@@ -109,7 +128,7 @@ async function apply(deps: ProcessEventDeps, inboxId: string, invoiceId: string)
       expectedVersion: loaded.version,
       attemptId: invoice.attemptId,
       result,
-      inboxId,
+      inboxId: source?.inboxId ?? null,
     });
     // 無効化（attemptToInvalidate）と Shopify への反映は、commit の後に呼び出し側（handleBtcpayEvent）が行う
     if (saved) {

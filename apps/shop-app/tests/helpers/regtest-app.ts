@@ -5,6 +5,7 @@ import { GreenfieldClient, type GreenfieldConfig } from "../../src/adapters/btcp
 import { PrismaInboxRepository } from "../../src/adapters/db/prisma-inbox-repository";
 import { PrismaPaymentRepository } from "../../src/adapters/db/prisma-payment-repository";
 import { FakeShopifyGateway } from "../../src/adapters/shopify-fake/fake-shopify-gateway";
+import type { HandleEventDeps } from "../../src/application/process-btcpay-event";
 import { addBitcoinOrder, TEST_SHOP } from "./orders";
 import { btcpayConfig } from "./regtest";
 import { createTestDb } from "./test-db";
@@ -19,6 +20,8 @@ export type RegtestApp = {
   payments: PrismaPaymentRepository;
   shopify: FakeShopifyGateway;
   server: WebhookServer;
+  // ワーカーと同じ依存。スイープ（runSweep）にもこれを渡す
+  deps: HandleEventDeps;
   // 「Bitcoinで支払う」の支払い待ちの注文をフェイクの Shopify に足す
   addOrder: () => string;
   close: () => Promise<void>;
@@ -35,18 +38,16 @@ export async function startRegtestApp(): Promise<RegtestApp> {
     process.env,
     join(__dirname, "..", "..", "..", "..", "infra", "regtest", ".bootstrap.env"),
   );
-  const server = await startWebhookServer(
-    {
-      payments,
-      inbox: new PrismaInboxRepository(prisma),
-      btcpay: greenfield,
-      shopifyFor: async (shop) => {
-        if (shop !== TEST_SHOP) throw new Error(`想定しないショップ ${shop}`);
-        return shopify;
-      },
+  const deps: HandleEventDeps = {
+    payments,
+    inbox: new PrismaInboxRepository(prisma),
+    btcpay: greenfield,
+    shopifyFor: async (shop) => {
+      if (shop !== TEST_SHOP) throw new Error(`想定しないショップ ${shop}`);
+      return shopify;
     },
-    secret,
-  );
+  };
+  const server = await startWebhookServer(deps, secret);
   return {
     prisma,
     config,
@@ -54,6 +55,7 @@ export async function startRegtestApp(): Promise<RegtestApp> {
     payments,
     shopify,
     server,
+    deps,
     addOrder: () => addBitcoinOrder(shopify),
     close: async () => {
       await server.close();

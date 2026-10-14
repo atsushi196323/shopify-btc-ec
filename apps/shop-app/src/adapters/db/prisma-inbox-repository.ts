@@ -39,6 +39,15 @@ export class PrismaInboxRepository implements InboxRepository {
     await this.prisma.inbox.update({ where: { id: inboxId }, data: { status: "DONE" } });
   }
 
+  async findPending(updatedBefore: Date): Promise<string[]> {
+    const rows = await this.prisma.inbox.findMany({
+      where: { status: "PENDING", updatedAt: { lte: updatedBefore } },
+      orderBy: { receivedAt: "asc" },
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
+  }
+
   async recordFailure(inboxId: string, error: string, maxAttempts: number): Promise<InboxStatus> {
     return this.prisma.$transaction(async (tx) => {
       // 別の処理が先に DONE にした行は書き換えない
