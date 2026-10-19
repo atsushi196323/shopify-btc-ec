@@ -33,6 +33,7 @@ Shopify の開発ストアに、BTCPay Server（regtest）を使った Bitcoin �
 - 統合: 本物の BTCPay と bitcoind（regtest）、フェイクの Shopify。アプリはテストプロセスの中で組み立てる。
 - 遅延や例外の注入は、BTCPay アダプタを包むテスト用デコレータで行う。本番コードにテスト用の分岐を入れない。
 - レートは BTCPay の rate rules で `BTC_JPY` を固定値にする。
+- バグを直すときは、再現するテストも書く。修正を一時的に外してそのテストが失敗することを確かめ、テストが問題を捕まえていることを示す。
 
 ## ローカル環境
 - regtest 環境: `infra/regtest/docker-compose.yml`（bitcoind・NBXplorer・BTCPay・Postgres）
@@ -42,6 +43,8 @@ Shopify の開発ストアに、BTCPay Server（regtest）を使った Bitcoin �
   - 状態確認: `curl -s http://localhost:49392/api/v1/health` が `{"synchronized":true}` になること
   - Docker 再起動後に NBXplorer・BTCPay が DB 接続エラーで止まっていたら:
     `docker compose -f infra/regtest/docker-compose.yml restart nbxplorer btcpayserver`
+  - 再起動しても `{"synchronized":false}` のままで、NBXplorer のログが `CoreSynching` で止まっていたら、
+    最後のブロックが古く bitcoind が初期同期中の扱いになっている。1ブロック生成すると戻る（手順は `infra/regtest/README.md`）
 - アプリは port 3000 に固定する（`shopify.web.toml` の `port = 3000`）。
   - Shopify → アプリ: Shopify CLI のトンネル経由。`--use-localhost` は使わない（Shopify の Webhook が届かなくなる）
   - BTCPay → アプリ: `http://host.docker.internal:3000/webhooks/btcpay`
