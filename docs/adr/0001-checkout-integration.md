@@ -72,6 +72,9 @@ Shopify のチェックアウトに独自の決済方法を出すには Payments
   - **`shopify app dev` を起動し直した直後は、拡張が読み込まれない**ことがあった。拡張のファイルを保存し直し、ログに「Updated dev preview」が出てから注文すると読み込まれた。
   - トンネル（quick tunnel）は途中で名前が引けなくなることがある。そのときは拡張の問い合わせも `orders/create` も届かないので、`shopify app dev` を起動し直す（URL が変わるので、`?dev=` 付きのリンクも作り直す）。
   - `?dev=` 付きのリンクは、CLI の開発サーバーの `/extensions/<拡張の uuid>/<target>` が転送する先（`/cart/<variant>:<数量>?dev=<トンネル>/extensions`）で、数量を変えれば請求額を変えられる。
+  - プレビューのリンクをストアのトップにする（`shopify app dev --checkout-cart-url /`）と、拡張は読み込まれない（2026-10-15）。
+    トップから商品・カートへ移る間に `?dev=` が外れるため。注文と invoice の作成は正常に進むので、拡張が何も表示しないことでしか気づけない。
+    `--checkout-cart-url` を使うときは、CLI の決まった形式（`/cart/<variant>:<数量>`）で在庫のある商品を指定する。
   - regtest の invoice の期限は 180 秒（bootstrap.sh。60 秒では手で確かめる時間が足りず延ばした。ADR 10）なので、ボタンから支払う確認は注文から3分以内に行う。W3 の Webhook の処理ができるまで、BTCPay で期限が切れても拡張は支払い待ちのまま表示する。
 
 ## 検討した代替案
