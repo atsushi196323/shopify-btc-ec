@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createInvoiceForOrder, reissueInvoice, type InvoiceDeps } from "../../src/application/create-invoice";
-import { runSweep, type SweepSettings } from "../../src/application/sweep";
+import { DEFAULT_SWEEP_SETTINGS, runSweep, type SweepSettings } from "../../src/application/sweep";
 import { failOnce, InjectingBtcpayGateway } from "../helpers/btcpay-decorator";
 import { mineBlocks, pay, paymentMethod, waitFor } from "../helpers/regtest";
 import { TEST_SHOP } from "../helpers/orders";
@@ -13,7 +13,7 @@ import { ShortExpiryBtcpayGateway } from "../helpers/short-expiry-btcpay";
 // スイープは DB 全体を見るので、作成中の呼び出しと重ならないように、テストは順に流す
 const EXPIRY_WAIT_MS = 120_000;
 // 孤児と inbox の行を待たずに拾う
-const settings: SweepSettings = { orphanAfterMs: 0, invalidatedWatchMs: 600_000, inboxRetryAfterMs: 0 };
+const settings: SweepSettings = { ...DEFAULT_SWEEP_SETTINGS, orphanAfterMs: 0, inboxRetryAfterMs: 0 };
 
 describe("シナリオ8: クラッシュからの回復（regtest）", () => {
   let app: RegtestApp;

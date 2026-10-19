@@ -111,6 +111,8 @@ export interface PaymentRepository {
   findOrphanAttempts(createdBefore: Date): Promise<OrphanAttempt[]>;
   // 終端でない（NEW・PROCESSING の）、invoice が紐づいた試行
   findUnsettledInvoices(): Promise<InvoiceToReconcile[]>;
+  // expiredSince 以降に EXPIRED を記録した試行（期限後の入金の監視期間）。最後の更新の時刻で数える
+  findExpiredInvoices(expiredSince: Date): Promise<InvoiceToReconcile[]>;
   // Payment が UNRESOLVED なのに、現在の試行が NEW のまま（無効化が済んでいない）の試行の id
   findAttemptsToInvalidate(): Promise<string[]>;
   // invalidatedSince 以降に、自分で無効化した試行（ADR 9 の監視期間）
