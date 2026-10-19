@@ -126,3 +126,15 @@ DB と外部システム（BTCPay、Shopify）を1つのトランザクション
   - 統合（regtest）: `tests/integration/scenario-06-sweep-without-webhooks.test.ts` でシナリオ6を確かめた。テストの Webhook の受け口が配信を捨て（200 を返す。
     失敗を返すと BTCPay が後続の配信を止めるため）、入金と1ブロックの後に BTCPay で Settled になっても、アプリは支払い待ちのまま。
     スイープを1回回すと照合で PAID になり、同じ回の反映で Shopify の注文が支払い済みになる。もう一度回しても Shopify の呼び出しは増えない。
+
+## W4 で決めたこと（2026-10-19、期限後の入金の照合）
+- レビューで、スイープの照合（design.md 5.5 の 2）が終端でない試行（NEW・PROCESSING）だけを見ていて、Webhook を取りこぼした期限後の入金を拾えないことが分かった。
+  EXPIRED は試行の終端だが、BTCPay は期限後も `monitoringExpiration`（300秒）の間は入金を拾う。その Webhook を取りこぼすと（自動再送は切っている）、
+  Payment は EXPIRED のまま LATE_PAYMENT が付かず、再発行して払い直すと DOUBLE_PAYMENT も付かない（不変条件2が破れる）。
+- 照合の対象に、期限切れを記録してから一定期間（`expiredWatchMs`、既定 600 秒）の EXPIRED の試行を加えた。無効化した試行の監視（5.5 の 4）と同じ形にした。
+  期限切れの時刻は列を足さずに試行の `updatedAt` で数える。EXPIRED は終端なので、その後の更新は監視期間を延ばす方向にしかずれない。
+- 段は増やさず、照合（2）に入れた。期限後の入金で UNRESOLVED になったら、同じ回の無効化のリトライ（3）が再発行した新しい invoice を無効化する。
+- 監視期間を過ぎた後の期限後の入金は、無効化した試行と同じく見逃す（ADR 9 の「未確認のまま残すこと」と同じ扱い）。
+- テスト:
+  - application: `tests/application/sweep.test.ts`（取りこぼした期限後の入金で UNRESOLVED + LATE_PAYMENT、再発行の後なら同じ回で新しい invoice を無効化、監視期間を過ぎたら照合しない）
+  - 統合（regtest）: `tests/integration/scenario-06-sweep-without-webhooks.test.ts` に、期限切れの後に Webhook を遮断して入金し、スイープで UNRESOLVED + LATE_PAYMENT になるケースを足した。

@@ -6,7 +6,7 @@ import { PrismaPaymentRepository } from "../../src/adapters/db/prisma-payment-re
 import { FakeShopifyGateway } from "../../src/adapters/shopify-fake/fake-shopify-gateway";
 import { createInvoiceForOrder, reissueInvoice } from "../../src/application/create-invoice";
 import { handleBtcpayEvent } from "../../src/application/process-btcpay-event";
-import { runSweep, type SweepDeps, type SweepItem, type SweepSettings } from "../../src/application/sweep";
+import { DEFAULT_SWEEP_SETTINGS, runSweep, type SweepDeps, type SweepItem, type SweepSettings } from "../../src/application/sweep";
 import type { InvoiceObservation } from "../../src/domain/payment";
 import { FakeBtcpayGateway } from "../helpers/fake-btcpay";
 import { createTestDb } from "../helpers/test-db";
@@ -22,8 +22,8 @@ describe("runSweep", () => {
   let payments: PrismaPaymentRepository;
   let deps: SweepDeps;
 
-  // 孤児と inbox の行は待たずに拾う。監視期間は既定と同じ
-  const settings: SweepSettings = { orphanAfterMs: 0, invalidatedWatchMs: 600_000, inboxRetryAfterMs: 0 };
+  // 孤児と inbox の行は待たずに拾う。監視期間（無効化・期限切れ）は既定と同じ
+  const settings: SweepSettings = { ...DEFAULT_SWEEP_SETTINGS, orphanAfterMs: 0, inboxRetryAfterMs: 0 };
 
   beforeAll(() => {
     ({ prisma, cleanup } = createTestDb());
@@ -165,6 +165,55 @@ describe("runSweep", () => {
       });
       expect(itemOf(report.reconciled, ok.invoiceId)).toEqual({ id: ok.invoiceId, outcome: "APPLIED" });
       expect(await paymentRow(ok.paymentId)).toMatchObject({ status: "CONFIRMING" });
+    });
+
+    // 入金なしで期限切れになった（その Webhook は届いた）注文
+    async function expired() {
+      const order = await awaitingPayment();
+      await observe(order.invoiceId, { status: "EXPIRED", received: "NONE" });
+      expect(await paymentRow(order.paymentId)).toMatchObject({ status: "EXPIRED" });
+      return order;
+    }
+
+    it("期限後の入金の Webhook を取りこぼしても、監視期間の間は EXPIRED の試行を照合して UNRESOLVED + LATE_PAYMENT にする", async () => {
+      const { paymentId, invoiceId, shopifyOrderId } = await expired();
+      btcpay.setObservation(invoiceId, { status: "EXPIRED", received: "LATE" });
+
+      const report = await runSweep(deps, settings);
+
+      expect(itemOf(report.reconciled, invoiceId)).toEqual({ id: invoiceId, outcome: "APPLIED" });
+      const row = await paymentRow(paymentId);
+      expect(row).toMatchObject({ status: "UNRESOLVED", shopifySync: "DONE" });
+      expect(row.reviewFlags.map((f) => f.reason)).toEqual(["LATE_PAYMENT"]);
+      expect(shopify.orderTags(shopifyOrderId)).toEqual(["btc-review-late-payment"]);
+      expect(shopify.markedAsPaid).not.toContain(shopifyOrderId);
+    });
+
+    it("再発行の後、古い invoice への期限後の入金の Webhook を取りこぼしても、同じ回で UNRESOLVED にして新しい invoice を無効化する", async () => {
+      const { paymentId, invoiceId: oldInvoiceId, shopifyOrderId } = await expired();
+      const reissued = await reissueInvoice(invoiceDeps(), shopifyOrderId);
+      if (reissued.outcome !== "REISSUED") throw new Error(`REISSUED ではない: ${reissued.outcome}`);
+      btcpay.setObservation(oldInvoiceId, { status: "EXPIRED", received: "LATE" });
+
+      const report = await runSweep(deps, settings);
+
+      expect(itemOf(report.reconciled, oldInvoiceId)).toEqual({ id: oldInvoiceId, outcome: "APPLIED" });
+      const newAttemptId = reissued.payment.currentAttempt.id;
+      expect(itemOf(report.invalidated, newAttemptId)).toEqual({ id: newAttemptId, outcome: "INVALIDATED" });
+      expect(btcpay.invalidated).toEqual([reissued.invoice.invoiceId]);
+      const row = await paymentRow(paymentId);
+      expect(row.status).toBe("UNRESOLVED");
+      expect(row.reviewFlags.map((f) => f.reason)).toEqual(["LATE_PAYMENT"]);
+    });
+
+    it("期限切れを記録してから expiredWatchMs を過ぎた試行は照合しない", async () => {
+      const { invoiceId } = await expired();
+      btcpay.setObservation(invoiceId, { status: "EXPIRED", received: "LATE" });
+
+      const later = new Date(Date.now() + settings.expiredWatchMs + 1_000);
+      const report = await runSweep({ ...deps, now: () => later }, settings);
+
+      expect(itemOf(report.reconciled, invoiceId)).toBeUndefined();
     });
   });
 

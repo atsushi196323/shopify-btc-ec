@@ -242,7 +242,8 @@ Shopify の Webhook（`orders/create`）は、MVP では inbox を通さない�
 ### 5.5 スイープ（定期実行）
 1本のジョブで、次のすべてを担う。
 1. **孤児の回復**: CREATING のまま一定時間が経った試行を `GET invoices?orderId=<attemptId>` で検索する。見つかれば紐づけ、なければ作成を再試行する。初回の作成と再発行で同じ処理を使う。
-2. **照合**: 終端でない試行の状態を Greenfield から取り直し、5.3 と同じ処理を通す。
+2. **照合**: 終端でない試行と、期限切れから一定期間（設定値）の EXPIRED の試行の状態を Greenfield から取り直し、5.3 と同じ処理を通す。
+   EXPIRED の試行も見るのは、取りこぼした期限後の入金を拾うため（[ADR 8](adr/0008-inbox-and-idempotent-side-effects.md)、2026-10-19）。
 3. **無効化のリトライ**: Payment が UNRESOLVED なのに現在の試行が NEW なら、無効化する。
 4. **無効化した試行の監視**: `invalidatedByUs` の試行を、無効化から一定期間（設定値）照合する。入金があれば DOUBLE_PAYMENT を付ける。
 5. **inbox の再処理**: PENDING の行を処理する。

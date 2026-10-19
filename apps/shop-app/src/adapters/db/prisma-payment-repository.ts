@@ -227,6 +227,17 @@ export class PrismaPaymentRepository implements PaymentRepository {
     );
   }
 
+  // 期限切れの時刻は列に持たず、updatedAt で数える。EXPIRED は終端なので、その後の更新（期限後の入金の記録など）は
+  // updatedAt を後ろにずらすだけで、監視期間が延びる方向にしかずれない
+  async findExpiredInvoices(expiredSince: Date): Promise<InvoiceToReconcile[]> {
+    return toReconcile(
+      await this.prisma.invoiceAttempt.findMany({
+        where: { status: "EXPIRED", updatedAt: { gte: expiredSince }, btcpayInvoiceId: { not: null } },
+        orderBy: { updatedAt: "asc" },
+      }),
+    );
+  }
+
   async findAttemptsToInvalidate(): Promise<string[]> {
     // 現在の試行（ポインタが指す試行）だけを見る。ドメインの attemptToInvalidate と同じ条件
     const payments = await this.prisma.payment.findMany({
