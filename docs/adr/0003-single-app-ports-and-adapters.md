@@ -42,6 +42,7 @@ src/adapters/       btcpay / shopify / db / shopify-fake
 テンプレートには `package-lock.json`（npm）と `pnpm-workspace.yaml` の両方があり、実際の `node_modules` は pnpm で入っていた。
 拡張を生成したときに CLI が pnpm で依存を入れ、`pnpm-lock.yaml` ができたので、ロックファイルが2種類になった。
 - pnpm に揃え、`package-lock.json` を削除した。`package.json` に `packageManager: pnpm@11.0.9` を書き、CI（W4）は corepack で同じ版を使う。
+  （2026-10-20 の見直し: CI は corepack ではなく `pnpm/action-setup` を使い、`package.json` の `packageManager` から同じ版を入れている。`.github/workflows/ci.yml`）
 - 拡張（`extensions/*`）は pnpm のワークスペースとして同じロックファイルで管理する。
 - テンプレートの `Dockerfile` と `docker-start` も pnpm に直した。Docker でのデプロイは対象外なので、ビルドの確認はしていない。
 
