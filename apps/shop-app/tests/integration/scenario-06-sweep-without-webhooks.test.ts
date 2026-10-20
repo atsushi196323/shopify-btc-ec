@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createInvoiceForOrder } from "../../src/application/create-invoice";
 import { DEFAULT_SWEEP_SETTINGS, runSweep } from "../../src/application/sweep";
 import { greenfieldApi, mineBlocks, pay, paymentMethod, waitFor } from "../helpers/regtest";
-import { TEST_SHOP } from "../helpers/orders";
 import { startRegtestApp, type RegtestApp } from "../helpers/regtest-app";
 import { ShortExpiryBtcpayGateway } from "../helpers/short-expiry-btcpay";
 
@@ -24,10 +23,7 @@ describe("シナリオ6: Webhook を遮断してもスイープで収束する�
     const { shopify, prisma, server } = app;
     server.blocked = true;
     const shopifyOrderId = app.addOrder();
-    const created = await createInvoiceForOrder(
-      { shop: TEST_SHOP, payments: app.payments, btcpay: app.greenfield, shopify },
-      shopifyOrderId,
-    );
+    const created = await createInvoiceForOrder(app.invoiceDeps(), shopifyOrderId);
     if (created.outcome !== "CREATED") throw new Error(`CREATED ではない: ${created.outcome}`);
     const { paymentId } = created.payment;
     const { invoiceId } = created.invoice;
@@ -71,12 +67,7 @@ describe("シナリオ6: Webhook を遮断してもスイープで収束する�
       server.blocked = false;
       const shopifyOrderId = app.addOrder();
       const created = await createInvoiceForOrder(
-        {
-          shop: TEST_SHOP,
-          payments: app.payments,
-          btcpay: new ShortExpiryBtcpayGateway(app.greenfield, app.config),
-          shopify,
-        },
+        app.invoiceDeps(new ShortExpiryBtcpayGateway(app.greenfield, app.config)),
         shopifyOrderId,
       );
       if (created.outcome !== "CREATED") throw new Error(`CREATED ではない: ${created.outcome}`);

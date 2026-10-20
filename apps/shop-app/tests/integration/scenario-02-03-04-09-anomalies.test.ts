@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createInvoiceForOrder, reissueInvoice, type InvoiceDeps } from "../../src/application/create-invoice";
 import { greenfieldApi, mineBlocks, pay, paymentMethod, scaleBtc, waitFor } from "../helpers/regtest";
-import { TEST_SHOP } from "../helpers/orders";
 import { startRegtestApp, type RegtestApp } from "../helpers/regtest-app";
 import { ShortExpiryBtcpayGateway } from "../helpers/short-expiry-btcpay";
 
@@ -15,12 +14,7 @@ describe.concurrent("異常系と再発行（regtest）", () => {
 
   beforeAll(async () => {
     app = await startRegtestApp();
-    deps = {
-      shop: TEST_SHOP,
-      payments: app.payments,
-      btcpay: new ShortExpiryBtcpayGateway(app.greenfield, app.config),
-      shopify: app.shopify,
-    };
+    deps = app.invoiceDeps(new ShortExpiryBtcpayGateway(app.greenfield, app.config));
   });
 
   afterAll(async () => {
