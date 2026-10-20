@@ -82,6 +82,37 @@ flowchart LR
 
 Shopify とのつなぎ込み（拡張の表示、`orders/create` の受信、アプリ全体の起動）は、下の手動の E2E とデモ動画で確かめています。
 
+### どのテストが何を守っているか
+
+統合テストの各シナリオは、下の層のテストでも細かい場合分け（処理の順番・競合・失敗の注入）まで確かめています。
+
+| シナリオ | 統合テスト | 下の層のテスト |
+|---|---|---|
+| 1. 正常系 | [btcpay-webhook-worker.test.ts](apps/shop-app/tests/integration/btcpay-webhook-worker.test.ts) | [payment.test.ts](apps/shop-app/tests/unit/domain/payment.test.ts)、[process-btcpay-event.test.ts](apps/shop-app/tests/application/process-btcpay-event.test.ts) |
+| 2. 期限切れ → 再発行、期限後の入金で新しい invoice を無効化 | [scenario-02-03-04-09-anomalies.test.ts](apps/shop-app/tests/integration/scenario-02-03-04-09-anomalies.test.ts) | [reissue-and-invalidate.test.ts](apps/shop-app/tests/application/reissue-and-invalidate.test.ts) |
+| 3. 過少払い → UNRESOLVED + UNDERPAID | 同上 | [payment.test.ts](apps/shop-app/tests/unit/domain/payment.test.ts) |
+| 4. 過払い → PAID + OVERPAID | 同上 | [payment.test.ts](apps/shop-app/tests/unit/domain/payment.test.ts) |
+| 5. Webhook の再送で Shopify を二重に呼ばない | [btcpay-webhook-worker.test.ts](apps/shop-app/tests/integration/btcpay-webhook-worker.test.ts) | [webhook-handler.test.ts](apps/shop-app/tests/adapter/btcpay/webhook-handler.test.ts)、[sync-to-shopify.test.ts](apps/shop-app/tests/application/sync-to-shopify.test.ts)（並行の反映でも `orderMarkAsPaid` は1回） |
+| 6. Webhook を遮断してもスイープで収束 | [scenario-06-sweep-without-webhooks.test.ts](apps/shop-app/tests/integration/scenario-06-sweep-without-webhooks.test.ts) | [sweep.test.ts](apps/shop-app/tests/application/sweep.test.ts) |
+| 7. invoice 作成の競合（10並列 × 2） | [scenario-07-concurrent-create.test.ts](apps/shop-app/tests/integration/scenario-07-concurrent-create.test.ts) | [create-invoice.test.ts](apps/shop-app/tests/application/create-invoice.test.ts)、[extension-invoice.test.ts](apps/shop-app/tests/application/extension-invoice.test.ts)、[prisma-payment-repository.test.ts](apps/shop-app/tests/adapter/db/prisma-payment-repository.test.ts) |
+| 8. クラッシュからの回復 | [scenario-08-crash-recovery.test.ts](apps/shop-app/tests/integration/scenario-08-crash-recovery.test.ts) | [create-invoice.test.ts](apps/shop-app/tests/application/create-invoice.test.ts)（孤児の回復）、[sweep.test.ts](apps/shop-app/tests/application/sweep.test.ts) |
+| 9. 二重払いで DOUBLE_PAYMENT がちょうど1件 | [scenario-02-03-04-09-anomalies.test.ts](apps/shop-app/tests/integration/scenario-02-03-04-09-anomalies.test.ts) | [invariants.test.ts](apps/shop-app/tests/unit/domain/invariants.test.ts)（処理の順番の全組み合わせ）、[process-btcpay-event.test.ts](apps/shop-app/tests/application/process-btcpay-event.test.ts)（並列の処理） |
+
+シナリオのほかに守っていること
+
+| 守っていること | テスト |
+|---|---|
+| 状態は遷移表どおりにしか進まず、古い・同じ状態の観測は何もしない（全遷移と不正な遷移） | [invoice-attempt.test.ts](apps/shop-app/tests/unit/domain/invoice-attempt.test.ts)、[payment.test.ts](apps/shop-app/tests/unit/domain/payment.test.ts) |
+| 不変条件1〜5（[design.md 4章](docs/design.md)）。観測の全組み合わせ（試行1つで 25³ 通り、2つで 50³ 通り）を当て、1手ごとに確かめる | [invariants.test.ts](apps/shop-app/tests/unit/domain/invariants.test.ts)、[review-flag.test.ts](apps/shop-app/tests/unit/domain/review-flag.test.ts) |
+| 有効な試行は最大1件（複合外部キーが実際に違反を拒む。ADR 7） | [current-attempt-pointer.test.ts](apps/shop-app/tests/adapter/db/current-attempt-pointer.test.ts)、[review-flag-and-inbox.test.ts](apps/shop-app/tests/adapter/db/review-flag-and-inbox.test.ts) |
+| SQLite の WAL・`busy_timeout`・`foreign_keys` | [sqlite.test.ts](apps/shop-app/tests/adapter/db/sqlite.test.ts) |
+| `src/domain` は外部に依存しない（ADR 3） | [no-external-deps.test.ts](apps/shop-app/tests/unit/domain/no-external-deps.test.ts) |
+| BTCPay の Webhook の署名（本物の配信から作った既知のベクタ）。署名が合わない配信は inbox に入れない | [webhook.test.ts](apps/shop-app/tests/adapter/btcpay/webhook.test.ts)、[webhook-handler.test.ts](apps/shop-app/tests/adapter/btcpay/webhook-handler.test.ts) |
+| Shopify の GraphQL が保存した Admin API のスキーマに合い、結果の型の null 許容が一致する（ADR 10） | [admin-gateway.test.ts](apps/shop-app/tests/adapter/shopify/admin-gateway.test.ts) |
+| 請求額は Admin API から取り直し、別のショップの注文には答えない（ADR 4） | [create-invoice.test.ts](apps/shop-app/tests/application/create-invoice.test.ts)、[extension-invoice.test.ts](apps/shop-app/tests/application/extension-invoice.test.ts) |
+| 統合テストが本番と同じ依存の組み立てを使う（ADR 10） | [composition.test.ts](apps/shop-app/tests/app/composition.test.ts) |
+| 本物の BTCPay の振る舞い（無効化した invoice への入金の読み方など。ADR 9） | [greenfield-client.test.ts](apps/shop-app/tests/integration/btcpay/greenfield-client.test.ts) |
+
 ## ローカルで動かす
 
 必要なもの: Docker、Node.js 22.12 以上、pnpm、Shopify CLI（手動の E2E のみ）
@@ -155,7 +186,8 @@ pnpm test:integration   # 統合（期限切れを待つシナリオがあるの
 
 ## 今後の課題
 
-優先順に、outbox の本実装、Shopify の Webhook も inbox を通して `X-Shopify-Event-Id` で重複を除く、注文の自動キャンセル、Lightning、構造化ログとメトリクス、reorg の実装とテスト（[design.md 8章](docs/design.md#8-計画)）。
+優先順に、outbox の本実装、Shopify の Webhook も inbox を通して `X-Shopify-Event-Id` で重複を除く、注文の自動キャンセル、Lightning、構造化ログとメトリクス、
+管理画面の要対応一覧（フラグを対応済みにしてタグを付け直す操作を含む）、reorg の実装とテスト、ドメインのミューテーションテスト（[design.md 8章](docs/design.md#8-計画)）。
 
 ## リポジトリ構成
 
@@ -168,7 +200,7 @@ apps/shop-app/
   src/adapters/shopify-fake/  # テスト用のフェイク
   extensions/thank-you/       # Checkout UI Extension
   graphql/                    # 保存した Admin API のスキーマ
-  tests/{unit,adapter,application,integration}/
+  tests/{unit,adapter,application,app,integration}/
 infra/regtest/                # compose・bootstrap.sh（固定レート・ウォレット・Webhook）
 docs/design.md  docs/adr/  docs/diagrams/
 ```
