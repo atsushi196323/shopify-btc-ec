@@ -1,19 +1,20 @@
 import type { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GreenfieldClient, type GreenfieldConfig } from "../../src/adapters/btcpay/greenfield-client";
-import { PrismaPaymentRepository } from "../../src/adapters/db/prisma-payment-repository";
 import { FakeShopifyGateway } from "../../src/adapters/shopify-fake/fake-shopify-gateway";
-import { createInvoiceForOrder, type InvoiceDeps } from "../../src/application/create-invoice";
+import { createInvoiceForOrder } from "../../src/application/create-invoice";
 import { invoiceForExtension } from "../../src/application/extension-invoice";
 import { delay, InjectingBtcpayGateway } from "../helpers/btcpay-decorator";
 import { btcpayConfig } from "../helpers/regtest";
 import { createTestDb } from "../helpers/test-db";
 import { addBitcoinOrder, TEST_SHOP } from "../helpers/orders";
+import { composeInvoiceDeps } from "../../app/composition";
 
 // シナリオ7（design.md 7章、ADR 5）: invoice 作成の競合。
 // orders/create Webhook と拡張 API の入口（ルートが呼ぶユースケース）をそれぞれ10並列で呼び、
 // DB の Payment と本物の BTCPay の invoice がどちらも1件になることを確かめる。
-// ルートは認証して application に渡すだけなので（ADR 3）、テストプロセスではユースケースに依存を組み立てて渡す（ADR 10）
+// ルートは認証して application に渡すだけなので（ADR 3）、テストプロセスでは本番と同じ組み立て（app/composition.ts）に
+// BTCPay のデコレータとフェイクの Shopify を差し込み、ユースケースに渡す（ADR 10）
 describe("シナリオ7: invoice 作成の競合（regtest）", () => {
   let prisma: PrismaClient;
   let cleanup: () => Promise<void>;
@@ -31,7 +32,7 @@ describe("シナリオ7: invoice 作成の競合（regtest）", () => {
   it("Webhook と拡張から10並列ずつ作成しても、Payment と BTCPay の invoice はどちらも1件", async () => {
     const shopify = new FakeShopifyGateway();
     const btcpay = new InjectingBtcpayGateway(new GreenfieldClient(config));
-    const deps: InvoiceDeps = { shop: TEST_SHOP, payments: new PrismaPaymentRepository(prisma), btcpay, shopify };
+    const deps = composeInvoiceDeps(prisma, TEST_SHOP, btcpay, shopify);
     const shopifyOrderId = addBitcoinOrder(shopify);
     // 予約に勝った呼び出しが BTCPay から戻る前に、残りの全員が予約か既存の行の読み取りまで進むようにする
     btcpay.beforeCreate = delay(500);

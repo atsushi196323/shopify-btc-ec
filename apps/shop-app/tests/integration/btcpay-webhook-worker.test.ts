@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createInvoiceForOrder } from "../../src/application/create-invoice";
 import { greenfieldApi, mineBlocks, pay, paymentMethod, waitFor } from "../helpers/regtest";
-import { TEST_SHOP } from "../helpers/orders";
 import { startRegtestApp, type RegtestApp } from "../helpers/regtest-app";
 
 // bootstrap.sh が登録する Webhook の送信先
@@ -25,10 +24,7 @@ describe("BTCPay の Webhook とワーカー（regtest）", () => {
   it("シナリオ1: 入金 → 1ブロック生成で PAID になり、Shopify の注文が支払い済みになる", async () => {
     const { shopify, prisma, server } = app;
     const shopifyOrderId = app.addOrder();
-    const created = await createInvoiceForOrder(
-      { shop: TEST_SHOP, payments: app.payments, btcpay: app.greenfield, shopify },
-      shopifyOrderId,
-    );
+    const created = await createInvoiceForOrder(app.invoiceDeps(), shopifyOrderId);
     if (created.outcome !== "CREATED") throw new Error(`CREATED ではない: ${created.outcome}`);
     const { paymentId } = created.payment;
     const { invoiceId } = created.invoice;

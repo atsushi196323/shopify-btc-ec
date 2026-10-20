@@ -97,3 +97,21 @@ ESM と CommonJS で別々に読み込まれている可能性が高いが、原
   そこまで固定する（compose の版を指定するなど）のは、更新で実際に落ちたときに考える。Ubuntu 26 への移行は stretch に回す（design.md 8章）。
 - `concurrency` のグループを、PR は ref ごと、main への push はコミットごとにする。同じグループでは、待っている実行が新しい実行に置き換えられるので、
   `cancel-in-progress` を切るだけでは、続けてマージしたときに途中のコミットが検証されない。
+
+## 追記（2026-10-20）: 統合テストも本番と同じ組み立てを使い、Webhook の受信の入口をテストする
+- テストの見直しで、次の2点が見つかった。
+  - 統合テストは「コンポジションルートを呼び、デコレータやフェイクを差し込む」（上の「テストの構成」）としていたが、実際は
+    `tests/helpers/regtest-app.ts` で依存を手で組み立てていた。本番の組み立て（`app/invoice.server.ts`）は Shopify の認証（`shopify.server`）と
+    本番の DB（`db.server`）を読み込むので、テストプロセスから呼べないため。
+  - BTCPay の Webhook を受け取る入口（`receiveBtcpayWebhook`）は、署名の照合の関数を既知のベクタで確かめているだけで、
+    署名が合わない配信を inbox に入れないこと・重複の配信の扱いは、どのテストも確かめていなかった（統合テストは正しい配信が拒まれないことだけを見る）。
+- **決定**
+  - 組み立てのうち、Shopify の認証と DB の接続に依存しない部分を `app/composition.ts` に切り出す（`composeInvoiceDeps`・`composeBtcpayEventDeps`）。
+    本番の `invoice.server.ts` は本番の DB・Greenfield・Admin API を渡し、統合テストはテスト用の DB・BTCPay のデコレータ・フェイクの Shopify を渡す。
+    ショップの表記の正規化などの組み立ての中身が、本番とテストで食い違わなくなる。組み立ての単体テストは `tests/app/composition.test.ts`。
+  - `receiveBtcpayWebhook` のアダプタテスト（`tests/adapter/btcpay/webhook-handler.test.ts`）を加える。署名が合わない配信（別の secret・
+    書き換えたボディ・ヘッダなし・形の違い）は 401 で inbox に入れずワーカーも呼ばないこと、invoice に関係しないイベントは保存せずに 200、
+    処理済みの配信の再送は何もしないこと、PENDING のまま残った配信の再送は処理すること、ワーカーの例外でも 200 を返すことを確かめる。
+  - 本番のコードを一時的に壊し（署名の検証を外す・重複を処理しない・関係しないイベントに 500 を返す・ショップの表記をそろえない）、
+    それぞれ新しいテストが失敗することを確かめた。
+- 本番の値を渡す部分（`invoice.server.ts`・`sweep.server.ts`）は、これまでどおり手動の E2E で確かめる。

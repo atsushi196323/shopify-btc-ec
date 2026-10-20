@@ -3,7 +3,6 @@ import { createInvoiceForOrder, reissueInvoice, type InvoiceDeps } from "../../s
 import { DEFAULT_SWEEP_SETTINGS, runSweep, type SweepSettings } from "../../src/application/sweep";
 import { failOnce, InjectingBtcpayGateway } from "../helpers/btcpay-decorator";
 import { mineBlocks, pay, paymentMethod, waitFor } from "../helpers/regtest";
-import { TEST_SHOP } from "../helpers/orders";
 import { startRegtestApp, type RegtestApp } from "../helpers/regtest-app";
 import { ShortExpiryBtcpayGateway } from "../helpers/short-expiry-btcpay";
 
@@ -23,7 +22,7 @@ describe("シナリオ8: クラッシュからの回復（regtest）", () => {
   beforeAll(async () => {
     app = await startRegtestApp();
     btcpay = new InjectingBtcpayGateway(new ShortExpiryBtcpayGateway(app.greenfield, app.config));
-    deps = { shop: TEST_SHOP, payments: app.payments, btcpay, shopify: app.shopify };
+    deps = app.invoiceDeps(btcpay);
   });
 
   afterAll(async () => {
