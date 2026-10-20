@@ -1,6 +1,6 @@
 # ADR 8: inbox と冪等な外部呼び出し（outbox を見送る）
 
-- ステータス: 提案（下書き。W3 の実装時に確定）
+- ステータス: 承認（2026-10-19、W3 のワーカー・Shopify への反映と W4 のスイープを、シナリオ1・5・6 の統合テストで確認）
 - 日付: 2026-10-01
 
 ## コンテキスト
@@ -69,7 +69,7 @@ DB と外部システム（BTCPay、Shopify）を1つのトランザクション
 - **BTCPay の自動再送は切る**（`infra/regtest/bootstrap.sh`）。BTCPay 2.4.4 は、配信に失敗すると再送の待ち（10秒・1分・10分…）が明けるまで、
   同じ Webhook の後続の配信を止める。アプリを止めていた後は、新しい invoice のイベントが10分以上届かなくなった（regtest で確認）。
   取りこぼしたイベントは決定の2のとおり、スイープが Greenfield から取り直すので、自動再送がなくても状態は収束する。スイープ（W4）ができるまでは、
-  アプリが止まっていた間のイベントは反映されない。
+  アプリが止まっていた間のイベントは反映されない（2026-10-12 にスイープを実装した。下の「W4 で決めたこと」）。
 - テスト:
   - 単体・アダプタ: `tests/adapter/btcpay/webhook.test.ts`（本物の BTCPay の配信の本体と、openssl で計算した署名のベクタ）、
     `tests/adapter/db/prisma-inbox-repository.test.ts`、`tests/application/process-btcpay-event.test.ts`（二重払いを並列に処理して DOUBLE_PAYMENT がちょうど1件。
